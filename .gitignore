@@ -18,9 +18,8 @@ cognee_logs/
 # TTS output
 tts_output/
 
-# StyleTTS2 (separate git repo) and reference voices
+# StyleTTS2 (separate git repo)
 tts/StyleTTS2/
-tts/reference_voices/
 
 # OS
 .DS_Store
