@@ -21,6 +21,9 @@ tts_output/
 # StyleTTS2 (separate git repo)
 tts/StyleTTS2/
 
+# Reference voice audio files (large binaries)
+tts/reference_voices/*.wav
+
 # OS
 .DS_Store
 Thumbs.db
