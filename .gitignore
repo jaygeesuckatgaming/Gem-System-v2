@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Config with secrets
+config.py
+cognee/.env
+
+# Cognee data (large, generated)
+cognee_data/
+cognee_system/
+cognee_logs/
+
+# TTS output
+tts_output/
+
+# OS
+.DS_Store
+Thumbs.db

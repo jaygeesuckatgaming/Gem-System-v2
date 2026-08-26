@@ -1,0 +1,6 @@
+quart
+quart-cors
+ollama
+httpx
+websockets
+customtkinter
