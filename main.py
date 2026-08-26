@@ -5,12 +5,15 @@ Receives chat from Social Stream Ninja, sends to Ollama, broadcasts response
 
 import asyncio
 import html
+import json
+import os
 from collections import deque
 from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
 from clients import LLMClient, SSNClient, CogneeClient, TTSClient
+from clients.audio_player import AudioPlayer
 
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
@@ -21,8 +24,82 @@ ssn = SSNClient(api_url=config.SSN_API_URL, session_id=config.SSN_SESSION_ID)
 cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
 tts = TTSClient(tts_url=config.TTS_URL)
 
+# Audio player (plays TTS output when not using Neurosync)
+_tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
+audio_player = AudioPlayer(watch_path=_tts_output_path, device_name=config.AUDIO_OUTPUT_DEVICE or None)
+
 # Track recent AI responses to prevent echo loops
 _last_ai_responses = deque(maxlen=10)
+
+# Settings persistence file
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+
+
+def load_persisted_settings():
+    """Load settings from settings.json (overrides config.py defaults)"""
+    if not os.path.exists(SETTINGS_FILE):
+        return
+    try:
+        with open(SETTINGS_FILE, "r") as f:
+            data = json.load(f)
+        
+        if 'tts_enabled' in data:
+            config.TTS_ENABLED = data['tts_enabled']
+        if 'tts_url' in data:
+            config.TTS_URL = data['tts_url']
+            tts.tts_url = data['tts_url']
+        if 'tts_diffusion_steps' in data:
+            config.TTS_DIFFUSION_STEPS = data['tts_diffusion_steps']
+        if 'tts_embedding_scale' in data:
+            config.TTS_EMBEDDING_SCALE = data['tts_embedding_scale']
+        if 'tts_alpha' in data:
+            config.TTS_ALPHA = data['tts_alpha']
+        if 'tts_beta' in data:
+            config.TTS_BETA = data['tts_beta']
+        if 'tts_reference_voice' in data:
+            config.TTS_REFERENCE_VOICE = data['tts_reference_voice']
+        if 'audio_player_enabled' in data:
+            config.AUDIO_PLAYER_ENABLED = data['audio_player_enabled']
+        if 'audio_output_device' in data:
+            config.AUDIO_OUTPUT_DEVICE = data['audio_output_device']
+        if 'audio_ducking_enabled' in data:
+            config.AUDIO_DUCKING_ENABLED = data['audio_ducking_enabled']
+        if 'audio_duck_amount' in data:
+            config.AUDIO_DUCK_AMOUNT = data['audio_duck_amount']
+        if 'audio_duck_attack_ms' in data:
+            config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
+        if 'audio_duck_release_ms' in data:
+            config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+    except Exception as e:
+        print(f"Failed to load settings.json: {e}")
+
+
+def save_persisted_settings():
+    """Save TTS settings to settings.json"""
+    try:
+        data = {
+            'tts_enabled': config.TTS_ENABLED,
+            'tts_url': config.TTS_URL,
+            'tts_diffusion_steps': config.TTS_DIFFUSION_STEPS,
+            'tts_embedding_scale': config.TTS_EMBEDDING_SCALE,
+            'tts_alpha': config.TTS_ALPHA,
+            'tts_beta': config.TTS_BETA,
+            'tts_reference_voice': config.TTS_REFERENCE_VOICE,
+            'audio_player_enabled': config.AUDIO_PLAYER_ENABLED,
+            'audio_output_device': config.AUDIO_OUTPUT_DEVICE,
+            'audio_ducking_enabled': config.AUDIO_DUCKING_ENABLED,
+            'audio_duck_amount': config.AUDIO_DUCK_AMOUNT,
+            'audio_duck_attack_ms': config.AUDIO_DUCK_ATTACK_MS,
+            'audio_duck_release_ms': config.AUDIO_DUCK_RELEASE_MS
+        }
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save settings.json: {e}")
+
+
+# Load persisted settings on startup
+load_persisted_settings()
 
 
 async def handle_incoming_message(data: dict):
@@ -151,9 +228,40 @@ async def api_status():
         },
         'tts': {
             'enabled': tts.enabled,
-            'tts_url': config.TTS_URL
+            'tts_url': config.TTS_URL,
+            'diffusion_steps': config.TTS_DIFFUSION_STEPS,
+            'embedding_scale': config.TTS_EMBEDDING_SCALE,
+            'alpha': config.TTS_ALPHA,
+            'beta': config.TTS_BETA,
+            'reference_voice': config.TTS_REFERENCE_VOICE,
+            'audio_player_enabled': config.AUDIO_PLAYER_ENABLED
+        },
+        'audio': {
+            'output_device': config.AUDIO_OUTPUT_DEVICE,
+            'ducking_enabled': config.AUDIO_DUCKING_ENABLED,
+            'duck_amount': config.AUDIO_DUCK_AMOUNT,
+            'attack_ms': config.AUDIO_DUCK_ATTACK_MS,
+            'release_ms': config.AUDIO_DUCK_RELEASE_MS
         }
     })
+
+
+@app.route('/api/audio/devices', methods=['GET'])
+async def api_audio_devices():
+    """List available audio output devices"""
+    devices = []
+    try:
+        import sounddevice as sd
+        for dev in sd.query_devices():
+            if dev['max_output_channels'] > 0:
+                devices.append({
+                    'index': dev['index'],
+                    'name': dev['name']
+                })
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e), 'devices': []}), 500
+    
+    return jsonify({'status': 'ok', 'devices': devices})
 
 
 @app.route('/api/settings', methods=['GET'])
@@ -189,6 +297,32 @@ async def api_update_settings():
     if 'tts_url' in data:
         config.TTS_URL = data['tts_url']
         tts.tts_url = data['tts_url']
+    if 'tts_diffusion_steps' in data:
+        config.TTS_DIFFUSION_STEPS = data['tts_diffusion_steps']
+    if 'tts_embedding_scale' in data:
+        config.TTS_EMBEDDING_SCALE = data['tts_embedding_scale']
+    if 'tts_alpha' in data:
+        config.TTS_ALPHA = data['tts_alpha']
+    if 'tts_beta' in data:
+        config.TTS_BETA = data['tts_beta']
+    if 'tts_reference_voice' in data:
+        config.TTS_REFERENCE_VOICE = data['tts_reference_voice']
+    if 'audio_player_enabled' in data:
+        config.AUDIO_PLAYER_ENABLED = data['audio_player_enabled']
+    if 'audio_output_device' in data:
+        config.AUDIO_OUTPUT_DEVICE = data['audio_output_device']
+        audio_player.device_name = data['audio_output_device'] or None
+    if 'audio_ducking_enabled' in data:
+        config.AUDIO_DUCKING_ENABLED = data['audio_ducking_enabled']
+    if 'audio_duck_amount' in data:
+        config.AUDIO_DUCK_AMOUNT = data['audio_duck_amount']
+    if 'audio_duck_attack_ms' in data:
+        config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
+    if 'audio_duck_release_ms' in data:
+        config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+    
+    # Persist TTS settings to file
+    save_persisted_settings()
     
     return jsonify({'status': 'ok'})
 
@@ -245,6 +379,9 @@ async def startup():
     # Check TTS connection (if enabled)
     if config.TTS_ENABLED:
         await tts.check_connection()
+        # Start audio player (plays TTS output when not using Neurosync)
+        if config.AUDIO_PLAYER_ENABLED:
+            audio_player.start()
     
     # Start background tasks
     await start_background_tasks()

@@ -8,10 +8,20 @@ import customtkinter as ctk
 import httpx
 import threading
 import time
+import math
+import numpy as np
+import sounddevice as sd
 
 # Server URL
 SERVER_URL = "http://127.0.0.1:5000"
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
+
+# VU meter constants
+MIN_DB = -60.0
+MAX_DB = 0.0
+SMOOTHING_FACTOR = 0.85
+PEAK_HOLD_DURATION = 1.5
+TEST_TONE_FREQUENCY = 440
 
 # Appearance
 ctk.set_appearance_mode("dark")
@@ -23,7 +33,7 @@ class ControlPanel(ctk.CTk):
         super().__init__()
         
         self.title("Gem-System v2 - Control Panel")
-        self.geometry("900x650")
+        self.geometry("1000x800")
         
         # Create tab view
         self.tabview = ctk.CTkTabview(self)
@@ -33,11 +43,13 @@ class ControlPanel(ctk.CTk):
         self.llm_tab = self.tabview.add("LLM")
         self.memory_tab = self.tabview.add("Memory")
         self.tts_tab = self.tabview.add("TTS")
+        self.audio_tab = self.tabview.add("Audio")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_llm_tab()
         self.build_memory_tab()
         self.build_tts_tab()
+        self.build_audio_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -196,6 +208,11 @@ class ControlPanel(ctk.CTk):
         enable_check = ctk.CTkCheckBox(self.tts_tab, text="Enable TTS", variable=self.tts_enabled_var)
         enable_check.pack(anchor="w", padx=20, pady=10)
         
+        # Audio player toggle (plays TTS output when not using Neurosync)
+        self.audio_player_var = ctk.BooleanVar(value=True)
+        audio_check = ctk.CTkCheckBox(self.tts_tab, text="Enable Audio Player (disable when using Neurosync)", variable=self.audio_player_var)
+        audio_check.pack(anchor="w", padx=20, pady=10)
+        
         # TTS URL
         url_label = ctk.CTkLabel(self.tts_tab, text="TTS Server URL:", font=ctk.CTkFont(size=14))
         url_label.pack(anchor="w", padx=20, pady=(10, 0))
@@ -203,9 +220,59 @@ class ControlPanel(ctk.CTk):
         self.tts_url_entry = ctk.CTkEntry(self.tts_tab)
         self.tts_url_entry.pack(fill="x", padx=20, pady=10)
         
+        # Save button (top, always visible)
+        save_btn = ctk.CTkButton(self.tts_tab, text="Save TTS Settings", command=self.save_tts_settings)
+        save_btn.pack(pady=10)
+        
+        # Scrollable frame for StyleTTS2 parameters
+        params_frame = ctk.CTkScrollableFrame(self.tts_tab, height=400)
+        params_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # StyleTTS2 parameters section
+        params_label = ctk.CTkLabel(params_frame, text="StyleTTS2 Parameters", font=ctk.CTkFont(size=16, weight="bold"))
+        params_label.pack(anchor="w", pady=(5, 10))
+        
+        # Diffusion steps
+        diff_label = ctk.CTkLabel(params_frame, text="Diffusion Steps:", font=ctk.CTkFont(size=13))
+        diff_label.pack(anchor="w")
+        self.diffusion_steps_slider = ctk.CTkSlider(params_frame, from_=5, to=50, number_of_steps=45, command=self.update_diffusion_label)
+        self.diffusion_steps_slider.pack(fill="x", pady=(0, 5))
+        self.diffusion_value_label = ctk.CTkLabel(params_frame, text="20", font=ctk.CTkFont(size=12))
+        self.diffusion_value_label.pack(anchor="e")
+        
+        # Embedding scale
+        emb_label = ctk.CTkLabel(params_frame, text="Embedding Scale:", font=ctk.CTkFont(size=13))
+        emb_label.pack(anchor="w", pady=(10, 0))
+        self.embedding_scale_slider = ctk.CTkSlider(params_frame, from_=0.5, to=1.5, number_of_steps=20, command=self.update_embedding_label)
+        self.embedding_scale_slider.pack(fill="x", pady=(0, 5))
+        self.embedding_value_label = ctk.CTkLabel(params_frame, text="1.0", font=ctk.CTkFont(size=12))
+        self.embedding_value_label.pack(anchor="e")
+        
+        # Alpha
+        alpha_label = ctk.CTkLabel(params_frame, text="Alpha (speed):", font=ctk.CTkFont(size=13))
+        alpha_label.pack(anchor="w", pady=(10, 0))
+        self.alpha_slider = ctk.CTkSlider(params_frame, from_=0.0, to=1.0, number_of_steps=20, command=self.update_alpha_label)
+        self.alpha_slider.pack(fill="x", pady=(0, 5))
+        self.alpha_value_label = ctk.CTkLabel(params_frame, text="0.3", font=ctk.CTkFont(size=12))
+        self.alpha_value_label.pack(anchor="e")
+        
+        # Beta
+        beta_label = ctk.CTkLabel(params_frame, text="Beta (emotion):", font=ctk.CTkFont(size=13))
+        beta_label.pack(anchor="w", pady=(10, 0))
+        self.beta_slider = ctk.CTkSlider(params_frame, from_=0.0, to=1.0, number_of_steps=20, command=self.update_beta_label)
+        self.beta_slider.pack(fill="x", pady=(0, 5))
+        self.beta_value_label = ctk.CTkLabel(params_frame, text="0.7", font=ctk.CTkFont(size=12))
+        self.beta_value_label.pack(anchor="e")
+        
+        # Reference voice
+        voice_label = ctk.CTkLabel(params_frame, text="Reference Voice:", font=ctk.CTkFont(size=13))
+        voice_label.pack(anchor="w", pady=(10, 0))
+        self.reference_voice_entry = ctk.CTkEntry(params_frame)
+        self.reference_voice_entry.pack(fill="x", pady=(0, 10))
+        
         # Test TTS section
         test_label = ctk.CTkLabel(self.tts_tab, text="Test TTS:", font=ctk.CTkFont(size=14))
-        test_label.pack(anchor="w", padx=20, pady=(20, 0))
+        test_label.pack(anchor="w", padx=20, pady=(10, 0))
         
         test_frame = ctk.CTkFrame(self.tts_tab)
         test_frame.pack(fill="x", padx=20, pady=10)
@@ -216,12 +283,301 @@ class ControlPanel(ctk.CTk):
         test_btn = ctk.CTkButton(test_frame, text="Speak", width=100, command=self.test_tts)
         test_btn.pack(side="right", padx=10, pady=10)
         
+        # Load current settings
+        self.load_tts_settings()
+    
+    def update_diffusion_label(self, value):
+        self.diffusion_value_label.configure(text=str(int(value)))
+    
+    def update_embedding_label(self, value):
+        self.embedding_value_label.configure(text=f"{value:.1f}")
+    
+    def update_alpha_label(self, value):
+        self.alpha_value_label.configure(text=f"{value:.2f}")
+    
+    def update_beta_label(self, value):
+        self.beta_value_label.configure(text=f"{value:.2f}")
+    
+    # ==================== AUDIO TAB ====================
+    def build_audio_tab(self):
+        """Build the Audio settings tab"""
+        self._current_device = ""
+        self._is_testing_output = False
+        self._output_stream = None
+        self._output_start_idx = 0
+        self._output_smoothed_db = MIN_DB
+        self._output_peak_db = MIN_DB
+        self._output_peak_hold_time = time.time()
+        
+        title = ctk.CTkLabel(self.audio_tab, text="Audio Settings", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+        
+        # Scrollable frame
+        scroll_frame = ctk.CTkScrollableFrame(self.audio_tab)
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # --- Output Device ---
+        device_section = ctk.CTkLabel(scroll_frame, text="Output Device", font=ctk.CTkFont(size=16, weight="bold"))
+        device_section.pack(anchor="w", pady=(5, 10))
+        
+        device_label = ctk.CTkLabel(scroll_frame, text="Audio Output Device:", font=ctk.CTkFont(size=13))
+        device_label.pack(anchor="w")
+        
+        self.audio_device_combo = ctk.CTkComboBox(scroll_frame, values=["System Default"], width=400)
+        self.audio_device_combo.pack(fill="x", pady=(0, 5))
+        
+        # Device buttons row
+        device_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        device_btn_frame.pack(fill="x", pady=(0, 5))
+        
+        refresh_devices_btn = ctk.CTkButton(device_btn_frame, text="Refresh Devices", width=150, command=self.refresh_audio_devices)
+        refresh_devices_btn.pack(side="left", padx=(0, 10))
+        
+        self.test_output_btn = ctk.CTkButton(device_btn_frame, text="Test", width=100, command=self.toggle_output_test)
+        self.test_output_btn.pack(side="left")
+        
+        # Output VU meter
+        vu_label = ctk.CTkLabel(scroll_frame, text="Output VU Meter:", font=ctk.CTkFont(size=13))
+        vu_label.pack(anchor="w", pady=(10, 0))
+        
+        self.output_vu_canvas = ctk.CTkCanvas(scroll_frame, height=30, bg="#1a1a1a", highlightthickness=0)
+        self.output_vu_canvas.pack(fill="x", pady=(0, 15))
+        
+        # --- Audio Ducking ---
+        ducking_section = ctk.CTkLabel(scroll_frame, text="Audio Ducking", font=ctk.CTkFont(size=16, weight="bold"))
+        ducking_section.pack(anchor="w", pady=(10, 5))
+        
+        self.ducking_enabled_var = ctk.BooleanVar(value=False)
+        ducking_check = ctk.CTkCheckBox(scroll_frame, text="Enable Audio Ducking (lower music when TTS speaks)", variable=self.ducking_enabled_var)
+        ducking_check.pack(anchor="w", pady=5)
+        
+        # Duck amount
+        duck_amount_label = ctk.CTkLabel(scroll_frame, text="Duck Amount (dB):", font=ctk.CTkFont(size=13))
+        duck_amount_label.pack(anchor="w", pady=(10, 0))
+        self.duck_amount_slider = ctk.CTkSlider(scroll_frame, from_=-30, to=0, number_of_steps=30, command=self.update_duck_amount_label)
+        self.duck_amount_slider.pack(fill="x", pady=(0, 5))
+        self.duck_amount_value = ctk.CTkLabel(scroll_frame, text="-15 dB", font=ctk.CTkFont(size=12))
+        self.duck_amount_value.pack(anchor="e")
+        
+        # Attack time
+        attack_label = ctk.CTkLabel(scroll_frame, text="Attack Time (ms):", font=ctk.CTkFont(size=13))
+        attack_label.pack(anchor="w", pady=(10, 0))
+        self.attack_slider = ctk.CTkSlider(scroll_frame, from_=0, to=1000, number_of_steps=100, command=self.update_attack_label)
+        self.attack_slider.pack(fill="x", pady=(0, 5))
+        self.attack_value = ctk.CTkLabel(scroll_frame, text="100 ms", font=ctk.CTkFont(size=12))
+        self.attack_value.pack(anchor="e")
+        
+        # Release time
+        release_label = ctk.CTkLabel(scroll_frame, text="Release Time (ms):", font=ctk.CTkFont(size=13))
+        release_label.pack(anchor="w", pady=(10, 0))
+        self.release_slider = ctk.CTkSlider(scroll_frame, from_=0, to=2000, number_of_steps=200, command=self.update_release_label)
+        self.release_slider.pack(fill="x", pady=(0, 5))
+        self.release_value = ctk.CTkLabel(scroll_frame, text="500 ms", font=ctk.CTkFont(size=12))
+        self.release_value.pack(anchor="e")
+        
         # Save button
-        save_btn = ctk.CTkButton(self.tts_tab, text="Save TTS Settings", command=self.save_tts_settings)
+        save_btn = ctk.CTkButton(scroll_frame, text="Save Audio Settings", command=self.save_audio_settings)
         save_btn.pack(pady=20)
         
         # Load current settings
-        self.load_tts_settings()
+        self.load_audio_settings()
+        self.refresh_audio_devices()
+        
+        # Start VU meter update loop
+        self.after(50, self.update_vu_meter)
+    
+    def update_duck_amount_label(self, value):
+        self.duck_amount_value.configure(text=f"{int(value)} dB")
+    
+    def update_attack_label(self, value):
+        self.attack_value.configure(text=f"{int(value)} ms")
+    
+    def update_release_label(self, value):
+        self.release_value.configure(text=f"{int(value)} ms")
+    
+    def refresh_audio_devices(self):
+        """Fetch available audio output devices"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/audio/devices", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                devices = data.get('devices', [])
+                
+                device_names = ["System Default"]
+                for dev in devices:
+                    device_names.append(f"[{dev['index']}] {dev['name']}")
+                
+                self.audio_device_combo.configure(values=device_names)
+                
+                # Restore current selection
+                current = self._current_device
+                if current and current in device_names:
+                    self.audio_device_combo.set(current)
+                else:
+                    self.audio_device_combo.set("System Default")
+        except Exception as e:
+            print(f"Failed to fetch audio devices: {e}")
+    
+    def load_audio_settings(self):
+        """Load current audio settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                audio = data.get('audio', {})
+                
+                self._current_device = audio.get('output_device', '')
+                
+                self.ducking_enabled_var.set(audio.get('ducking_enabled', False))
+                
+                self.duck_amount_slider.set(audio.get('duck_amount', -15))
+                self.duck_amount_value.configure(text=f"{audio.get('duck_amount', -15)} dB")
+                
+                self.attack_slider.set(audio.get('attack_ms', 100))
+                self.attack_value.configure(text=f"{audio.get('attack_ms', 100)} ms")
+                
+                self.release_slider.set(audio.get('release_ms', 500))
+                self.release_value.configure(text=f"{audio.get('release_ms', 500)} ms")
+        except Exception as e:
+            print(f"Failed to load audio settings: {e}")
+    
+    def save_audio_settings(self):
+        """Save audio settings to server"""
+        try:
+            selected_device = self.audio_device_combo.get()
+            if selected_device == "System Default":
+                device_name = ""
+            else:
+                device_name = selected_device
+            
+            payload = {
+                'audio_output_device': device_name,
+                'audio_ducking_enabled': self.ducking_enabled_var.get(),
+                'audio_duck_amount': int(self.duck_amount_slider.get()),
+                'audio_duck_attack_ms': int(self.attack_slider.get()),
+                'audio_duck_release_ms': int(self.release_slider.get())
+            }
+            
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Audio settings saved")
+        except Exception as e:
+            print(f"Failed to save audio settings: {e}")
+    
+    # ==================== OUTPUT TEST + VU METER ====================
+    def _get_selected_device_id(self):
+        """Extract device ID from the selected combo value"""
+        selected = self.audio_device_combo.get()
+        if selected == "System Default" or '[' not in selected:
+            return None
+        try:
+            return int(selected.split(']')[0].strip('['))
+        except Exception:
+            return None
+    
+    def toggle_output_test(self):
+        """Start/stop the output test tone"""
+        if getattr(self, '_is_testing_output', False):
+            self.stop_output_test()
+        else:
+            self.start_output_test()
+    
+    def start_output_test(self):
+        """Play a 440Hz test tone through the selected device"""
+        device_id = self._get_selected_device_id()
+        if device_id is None:
+            print("No valid device selected for test")
+            return
+        
+        self._is_testing_output = True
+        self._output_start_idx = 0
+        self._output_smoothed_db = MIN_DB
+        self._output_peak_db = MIN_DB
+        self._output_peak_hold_time = time.time()
+        self.test_output_btn.configure(text="Stop")
+        
+        try:
+            samplerate = sd.query_devices(device_id, 'output')['default_samplerate']
+            self._output_stream = sd.OutputStream(
+                device=device_id, channels=1, samplerate=samplerate,
+                callback=self._output_audio_callback
+            )
+            self._output_stream.start()
+            print(f"Output test started on device {device_id}")
+        except Exception as e:
+            print(f"Error starting output test: {e}")
+            self.stop_output_test()
+    
+    def stop_output_test(self):
+        """Stop the output test tone"""
+        if getattr(self, '_output_stream', None):
+            try:
+                self._output_stream.close()
+            except Exception:
+                pass
+        self._output_stream = None
+        self._is_testing_output = False
+        self.test_output_btn.configure(text="Test")
+        self._output_smoothed_db = MIN_DB
+        self._output_peak_db = MIN_DB
+    
+    def _output_audio_callback(self, outdata, frames, time_info, status):
+        """Generate test tone and measure output level"""
+        t = (self._output_start_idx + np.arange(frames)) / self._output_stream.samplerate
+        outdata[:] = 0.5 * np.sin(2 * np.pi * TEST_TONE_FREQUENCY * t).reshape(-1, 1)
+        self._output_start_idx += frames
+        
+        rms = np.sqrt(np.mean(outdata[:] ** 2))
+        current_db = 20 * math.log10(rms) if rms > 0 else MIN_DB
+        
+        self._output_smoothed_db = (SMOOTHING_FACTOR * self._output_smoothed_db) + ((1 - SMOOTHING_FACTOR) * current_db)
+        if self._output_smoothed_db > self._output_peak_db:
+            self._output_peak_db = self._output_smoothed_db
+            self._output_peak_hold_time = time.time()
+    
+    def update_vu_meter(self):
+        """Update the VU meter canvas (called periodically)"""
+        if not hasattr(self, 'output_vu_canvas'):
+            return
+        
+        # Decay peak hold
+        if getattr(self, '_is_testing_output', False):
+            if time.time() - getattr(self, '_output_peak_hold_time', time.time()) > PEAK_HOLD_DURATION:
+                self._output_peak_db = max(self._output_smoothed_db, self._output_peak_db - 2)
+        else:
+            self._output_smoothed_db = max(MIN_DB, self._output_smoothed_db - 3)
+            self._output_peak_db = max(self._output_smoothed_db, self._output_peak_db - 3)
+        
+        canvas = self.output_vu_canvas
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
+            return
+        
+        canvas.delete("all")
+        
+        smoothed_db = getattr(self, '_output_smoothed_db', MIN_DB)
+        peak_db = getattr(self, '_output_peak_db', MIN_DB)
+        
+        bar_len = int(((max(MIN_DB, min(smoothed_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        green_w = int(width * 0.7)
+        yellow_w = int(width * 0.9)
+        
+        if bar_len > 0:
+            canvas.create_rectangle(0, 0, min(bar_len, green_w), height, fill="#4CAF50", width=0)
+        if bar_len > green_w:
+            canvas.create_rectangle(green_w, 0, min(bar_len, yellow_w), height, fill="#FFC107", width=0)
+        if bar_len > yellow_w:
+            canvas.create_rectangle(yellow_w, 0, bar_len, height, fill="#F44336", width=0)
+        
+        peak_pos = int(((max(MIN_DB, min(peak_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        if peak_pos > 1:
+            canvas.create_line(peak_pos, 0, peak_pos, height, fill="white", width=2)
+        
+        canvas.create_text(width - 10, height / 2, text=f"{smoothed_db:.1f} dB", anchor="e", fill="white")
+        
+        # Schedule next update
+        self.after(50, self.update_vu_meter)
     
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):
@@ -488,6 +844,24 @@ class ControlPanel(ctk.CTk):
                 self.tts_url_entry.insert(0, tts.get('tts_url', ''))
                 
                 self.tts_enabled_var.set(tts.get('enabled', False))
+                
+                self.audio_player_var.set(tts.get('audio_player_enabled', True))
+                
+                # Load StyleTTS2 parameters from main server config
+                self.diffusion_steps_slider.set(tts.get('diffusion_steps', 20))
+                self.diffusion_value_label.configure(text=str(tts.get('diffusion_steps', 20)))
+                
+                self.embedding_scale_slider.set(tts.get('embedding_scale', 1.0))
+                self.embedding_value_label.configure(text=f"{tts.get('embedding_scale', 1.0):.1f}")
+                
+                self.alpha_slider.set(tts.get('alpha', 0.3))
+                self.alpha_value_label.configure(text=f"{tts.get('alpha', 0.3):.2f}")
+                
+                self.beta_slider.set(tts.get('beta', 0.7))
+                self.beta_value_label.configure(text=f"{tts.get('beta', 0.7):.2f}")
+                
+                self.reference_voice_entry.delete(0, "end")
+                self.reference_voice_entry.insert(0, tts.get('reference_voice', ''))
         except Exception as e:
             print(f"Failed to load TTS settings: {e}")
     
@@ -496,7 +870,13 @@ class ControlPanel(ctk.CTk):
         try:
             payload = {
                 'tts_enabled': self.tts_enabled_var.get(),
-                'tts_url': self.tts_url_entry.get().strip()
+                'tts_url': self.tts_url_entry.get().strip(),
+                'tts_diffusion_steps': int(self.diffusion_steps_slider.get()),
+                'tts_embedding_scale': round(self.embedding_scale_slider.get(), 1),
+                'tts_alpha': round(self.alpha_slider.get(), 2),
+                'tts_beta': round(self.beta_slider.get(), 2),
+                'tts_reference_voice': self.reference_voice_entry.get().strip(),
+                'audio_player_enabled': self.audio_player_var.get()
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
@@ -504,6 +884,24 @@ class ControlPanel(ctk.CTk):
                 print("✓ TTS settings saved")
         except Exception as e:
             print(f"Failed to save TTS settings: {e}")
+        
+        # Also save StyleTTS2 parameters to StyleTTS2 server (if running)
+        try:
+            tts_url = self.tts_url_entry.get().strip()
+            base_url = tts_url.replace('/tts', '')
+            payload = {
+                'diffusion_steps': int(self.diffusion_steps_slider.get()),
+                'embedding_scale': round(self.embedding_scale_slider.get(), 1),
+                'alpha': round(self.alpha_slider.get(), 2),
+                'beta': round(self.beta_slider.get(), 2),
+                'reference_voice': self.reference_voice_entry.get().strip()
+            }
+            
+            response = httpx.post(f"{base_url}/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ StyleTTS2 parameters saved")
+        except Exception as e:
+            print(f"StyleTTS2 server not running, params saved to main config only: {e}")
     
     def test_tts(self):
         """Test TTS with entered text"""
@@ -525,6 +923,8 @@ class ControlPanel(ctk.CTk):
     def on_close(self):
         """Clean up on window close"""
         self.polling = False
+        if getattr(self, '_is_testing_output', False):
+            self.stop_output_test()
         self.destroy()
 
 

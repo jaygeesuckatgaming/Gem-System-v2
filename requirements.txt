@@ -4,3 +4,5 @@ ollama
 httpx
 websockets
 customtkinter
+sounddevice
+pygame
