@@ -99,6 +99,19 @@ class ControlPanel(ctk.CTk):
         # Refresh button
         refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
         refresh_btn.pack(pady=20)
+        
+        # Start Listener button
+        start_listen_btn = ctk.CTkButton(self.status_tab, text="Start Audio Listener", command=self.start_listener)
+        start_listen_btn.pack(pady=10)
+    
+    def start_listener(self):
+        """Launch the audio listener (listen.py)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_listen.bat")
+        try:
+            subprocess.Popen([bat_path], shell=True)
+            print("✓ Started Audio Listener")
+        except Exception as e:
+            print(f"Failed to start listener: {e}")
     
     # ==================== LLM TAB ====================
     def build_llm_tab(self):
@@ -345,6 +358,7 @@ class ControlPanel(ctk.CTk):
     def build_audio_tab(self):
         """Build the Audio settings tab"""
         self._current_device = ""
+        self._current_input_device = ""
         self._is_testing_output = False
         self._output_stream = None
         self._output_start_idx = 0
@@ -385,6 +399,25 @@ class ControlPanel(ctk.CTk):
         
         self.output_vu_canvas = ctk.CTkCanvas(scroll_frame, height=30, bg="#1a1a1a", highlightthickness=0)
         self.output_vu_canvas.pack(fill="x", pady=(0, 15))
+        
+        # --- Input Device (for listener) ---
+        input_section = ctk.CTkLabel(scroll_frame, text="Input Device (Listener)", font=ctk.CTkFont(size=16, weight="bold"))
+        input_section.pack(anchor="w", pady=(5, 10))
+        
+        input_label = ctk.CTkLabel(scroll_frame, text="Audio Input Device:", font=ctk.CTkFont(size=13))
+        input_label.pack(anchor="w")
+        
+        self.audio_input_combo = ctk.CTkComboBox(scroll_frame, values=["None"], width=400)
+        self.audio_input_combo.pack(fill="x", pady=(0, 5))
+        
+        input_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        input_btn_frame.pack(fill="x", pady=(0, 15))
+        
+        refresh_input_btn = ctk.CTkButton(input_btn_frame, text="Refresh Input Devices", width=180, command=self.refresh_input_devices)
+        refresh_input_btn.pack(side="left", padx=(0, 10))
+        
+        save_input_btn = ctk.CTkButton(input_btn_frame, text="Save Input Device", width=150, command=self.save_input_device)
+        save_input_btn.pack(side="left")
         
         # --- Audio Ducking ---
         ducking_section = ctk.CTkLabel(scroll_frame, text="Audio Ducking", font=ctk.CTkFont(size=16, weight="bold"))
@@ -452,14 +485,65 @@ class ControlPanel(ctk.CTk):
                 
                 self.audio_device_combo.configure(values=device_names)
                 
-                # Restore current selection
+                # Restore current selection by matching device ID
                 current = self._current_device
-                if current and current in device_names:
-                    self.audio_device_combo.set(current)
-                else:
+                matched = False
+                if current and current != "System Default" and '[' in current:
+                    current_id = current.split(']')[0].strip('[')
+                    for name in device_names:
+                        if name.startswith(f"[{current_id}]"):
+                            self.audio_device_combo.set(name)
+                            matched = True
+                            break
+                if not matched:
                     self.audio_device_combo.set("System Default")
         except Exception as e:
             print(f"Failed to fetch audio devices: {e}")
+    
+    def refresh_input_devices(self):
+        """Fetch available audio input devices"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/audio/input_devices", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                devices = data.get('devices', [])
+                
+                device_names = ["None"]
+                for dev in devices:
+                    device_names.append(f"[{dev['index']}] {dev['name']}")
+                
+                self.audio_input_combo.configure(values=device_names)
+                
+                # Restore current selection by matching device ID
+                current = self._current_input_device
+                matched = False
+                if current and current != "None" and '[' in current:
+                    current_id = current.split(']')[0].strip('[')
+                    for name in device_names:
+                        if name.startswith(f"[{current_id}]"):
+                            self.audio_input_combo.set(name)
+                            matched = True
+                            break
+                if not matched:
+                    self.audio_input_combo.set("None")
+        except Exception as e:
+            print(f"Failed to fetch input devices: {e}")
+    
+    def save_input_device(self):
+        """Save the selected input device to mcp_settings.ini"""
+        selected = self.audio_input_combo.get()
+        if selected == "None":
+            device_string = "None"
+        else:
+            device_string = selected
+        
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/audio/input_device", json={"device": device_string}, timeout=5)
+            if response.status_code == 200:
+                self._current_input_device = device_string
+                print(f"✓ Input device saved: {device_string}")
+        except Exception as e:
+            print(f"Failed to save input device: {e}")
     
     def load_audio_settings(self):
         """Load current audio settings from server"""
@@ -483,6 +567,18 @@ class ControlPanel(ctk.CTk):
                 self.release_value.configure(text=f"{audio.get('release_ms', 500)} ms")
         except Exception as e:
             print(f"Failed to load audio settings: {e}")
+        
+        # Load input device from mcp_settings.ini
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/audio/input_device", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                self._current_input_device = data.get('selected_input', '')
+        except Exception as e:
+            print(f"Failed to load input device: {e}")
+        
+        # Refresh input devices
+        self.refresh_input_devices()
     
     def save_audio_settings(self):
         """Save audio settings to server"""

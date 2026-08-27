@@ -349,6 +349,59 @@ async def api_audio_devices():
     return jsonify({'status': 'ok', 'devices': devices})
 
 
+@app.route('/api/audio/input_devices', methods=['GET'])
+async def api_audio_input_devices():
+    """List available audio input devices"""
+    devices = []
+    try:
+        import sounddevice as sd
+        for dev in sd.query_devices():
+            if dev['max_input_channels'] > 0:
+                devices.append({
+                    'index': dev['index'],
+                    'name': dev['name']
+                })
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e), 'devices': []}), 500
+    
+    return jsonify({'status': 'ok', 'devices': devices})
+
+
+@app.route('/api/audio/input_device', methods=['GET'])
+async def api_audio_get_input_device():
+    """Get the current input device from mcp_settings.ini"""
+    import configparser
+    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
+    try:
+        parser = configparser.ConfigParser()
+        parser.read(ini_path)
+        selected = parser.get('Audio', 'selected_input', fallback='')
+    except Exception:
+        selected = ''
+    return jsonify({'status': 'ok', 'selected_input': selected})
+
+
+@app.route('/api/audio/input_device', methods=['POST'])
+async def api_audio_set_input_device():
+    """Set the input device in mcp_settings.ini"""
+    import configparser
+    data = await request.get_json()
+    device_string = data.get('device', '')
+    
+    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
+    try:
+        parser = configparser.ConfigParser()
+        parser.read(ini_path)
+        if not parser.has_section('Audio'):
+            parser.add_section('Audio')
+        parser.set('Audio', 'selected_input', device_string)
+        with open(ini_path, 'w') as f:
+            parser.write(f)
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e)}), 500
+
+
 @app.route('/api/settings', methods=['GET'])
 async def api_get_settings():
     """Get current settings for GUI"""
@@ -616,6 +669,71 @@ async def chat():
     data = await request.get_json()
     await handle_incoming_message(data)
     return jsonify({'status': 'ok'})
+
+
+@app.route('/process', methods=['POST'])
+async def process():
+    """Process transcribed audio from listen.py (microphone input)"""
+    data = await request.get_json()
+    text = data.get('text', '') or data.get('chatmessage', '')
+    source = data.get('source', 'microphone')
+    
+    if not text:
+        return jsonify({'status': 'error', 'error': 'No text provided'}), 400
+    
+    print(f"\n[VOICE] {text}")
+    
+    # Voice input doesn't need a wake word - process directly
+    # Check for song command
+    song_name = extract_song_command(text)
+    if song_name:
+        print(f"🎵 Song command detected: '{song_name}'")
+        await cognee.remember("User", text)
+        if config.TWITCH_MUSIC_CHECK_ENABLED:
+            result = music.verify_song(song_name)
+            if result.get('status') == 'restricted':
+                await ssn.send_message(result.get('message', "Sorry, that song is restricted."), targets=config.SSN_TARGETS)
+                return jsonify({'status': 'ok'})
+        music.download_song(song_name)
+        await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
+        return jsonify({'status': 'ok'})
+    
+    # Check for custom OSC action
+    osc_action = match_osc_action(text)
+    if osc_action:
+        print(f"🎛️ OSC action detected: '{osc_action.get('phrase')}'")
+        send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
+        await ssn.send_message(f"🎛️ Done! {osc_action.get('phrase')}", targets=config.SSN_TARGETS)
+        return jsonify({'status': 'ok'})
+    
+    # Store in memory
+    await cognee.remember("User", text)
+    
+    # Recall memory context
+    memory_context = await get_memory_context("User", text)
+    
+    # Get response from LLM
+    system_prompt = config.SYSTEM_PROMPT
+    if memory_context:
+        system_prompt = f"{system_prompt}\n\n{memory_context}"
+    
+    response = await llm.chat(text, system_prompt=system_prompt)
+    print(f"[GEM] {response}")
+    
+    # Store AI response in memory
+    await cognee.remember("Gem", response)
+    
+    # Track response to prevent echo
+    _last_ai_responses.append(html.unescape(response).strip())
+    
+    # Send response to TTS (if enabled)
+    if config.TTS_ENABLED:
+        await tts.speak(response)
+    
+    # Send response to SSN
+    await ssn.send_message(response, targets=config.SSN_TARGETS)
+    
+    return jsonify({'status': 'ok', 'response': response})
 
 
 async def start_background_tasks():
