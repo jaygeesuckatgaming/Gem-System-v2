@@ -11,6 +11,8 @@ import time
 import math
 import numpy as np
 import sounddevice as sd
+import subprocess
+import os
 
 # Server URL
 SERVER_URL = "http://127.0.0.1:5000"
@@ -840,6 +842,22 @@ class ControlPanel(ctk.CTk):
         title = ctk.CTkLabel(self.neurosync_tab, text="Neurosync", font=ctk.CTkFont(size=20, weight="bold"))
         title.pack(pady=10)
         
+        # --- Start/Stop buttons ---
+        start_frame = ctk.CTkFrame(self.neurosync_tab)
+        start_frame.pack(fill="x", padx=20, pady=10)
+        
+        start_label = ctk.CTkLabel(start_frame, text="Neurosync Services:", font=ctk.CTkFont(size=14, weight="bold"))
+        start_label.pack(anchor="w", padx=10, pady=(10, 5))
+        
+        btn_row = ctk.CTkFrame(start_frame, fg_color="transparent")
+        btn_row.pack(fill="x", padx=10, pady=(0, 10))
+        
+        self.start_localapi_btn = ctk.CTkButton(btn_row, text="Start Local API", width=150, command=self.start_neurosync_localapi)
+        self.start_localapi_btn.pack(side="left", padx=5)
+        
+        self.start_watcher_btn = ctk.CTkButton(btn_row, text="Start Watcher To Face", width=180, command=self.start_neurosync_watcher)
+        self.start_watcher_btn.pack(side="left", padx=5)
+        
         # Scrollable frame
         scroll_frame = ctk.CTkScrollableFrame(self.neurosync_tab)
         scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -1053,6 +1071,24 @@ class ControlPanel(ctk.CTk):
         emote = self.custom_emote_entry.get().strip()
         if emote:
             self.send_test_emote(emote)
+    
+    def start_neurosync_localapi(self):
+        """Launch the Neurosync Local API batch file"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_localapi.bat")
+        try:
+            subprocess.Popen([bat_path], shell=True)
+            print("✓ Started Neurosync Local API")
+        except Exception as e:
+            print(f"Failed to start Local API: {e}")
+    
+    def start_neurosync_watcher(self):
+        """Launch the Neurosync Watcher To Face batch file"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_watcher_to_face.bat")
+        try:
+            subprocess.Popen([bat_path], shell=True)
+            print("✓ Started Watcher To Face")
+        except Exception as e:
+            print(f"Failed to start Watcher To Face: {e}")
     
     # ==================== OSC TAB ====================
     def build_osc_tab(self):
