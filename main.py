@@ -284,6 +284,19 @@ async def api_status():
             'duck_amount': config.AUDIO_DUCK_AMOUNT,
             'attack_ms': config.AUDIO_DUCK_ATTACK_MS,
             'release_ms': config.AUDIO_DUCK_RELEASE_MS
+        },
+        'neurosync': {
+            'mouth_scale': config.BLENDSHAPE_MOUTH_SCALE,
+            'eye_scale': config.BLENDSHAPE_EYE_SCALE,
+            'eyebrow_scale': config.BLENDSHAPE_EYEBROW_SCALE,
+            'eyewide_scale': config.BLENDSHAPE_EYEWIDE_SCALE,
+            'eyesquint_scale': config.BLENDSHAPE_EYESQUINT_SCALE,
+            'osc': {
+                'enabled': config.OSC_ENABLED,
+                'ip': config.OSC_IP,
+                'port': config.OSC_PORT,
+                'address': config.OSC_ADDRESS
+            }
         }
     })
 
@@ -362,11 +375,68 @@ async def api_update_settings():
         config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
     if 'audio_duck_release_ms' in data:
         config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+    if 'blendshape_mouth_scale' in data:
+        config.BLENDSHAPE_MOUTH_SCALE = data['blendshape_mouth_scale']
+    if 'blendshape_eye_scale' in data:
+        config.BLENDSHAPE_EYE_SCALE = data['blendshape_eye_scale']
+    if 'blendshape_eyebrow_scale' in data:
+        config.BLENDSHAPE_EYEBROW_SCALE = data['blendshape_eyebrow_scale']
+    if 'blendshape_eyewide_scale' in data:
+        config.BLENDSHAPE_EYEWIDE_SCALE = data['blendshape_eyewide_scale']
+    if 'blendshape_eyesquint_scale' in data:
+        config.BLENDSHAPE_EYESQUINT_SCALE = data['blendshape_eyesquint_scale']
+    if 'osc_ip' in data:
+        config.OSC_IP = data['osc_ip']
+    if 'osc_port' in data:
+        config.OSC_PORT = data['osc_port']
+    if 'osc_address' in data:
+        config.OSC_ADDRESS = data['osc_address']
     
     # Persist TTS settings to file
     save_persisted_settings()
     
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/osc/emote', methods=['POST'])
+async def api_osc_emote():
+    """Send an OSC emote"""
+    data = await request.get_json()
+    emote_name = data.get('emote', '')
+    if not emote_name:
+        return jsonify({'status': 'error', 'error': 'No emote specified'}), 400
+    
+    success = send_osc_emote(emote_name)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
+def send_osc_emote(emote_name: str) -> bool:
+    """Send an emote via OSC (UDP)"""
+    import socket
+    
+    try:
+        ip = config.OSC_IP
+        port = config.OSC_PORT
+        address = config.OSC_ADDRESS
+        
+        # Build OSC message
+        address_bytes = address.encode('utf-8')
+        address_padded = address_bytes + b'\x00' * ((4 - len(address_bytes) % 4) % 4)
+        type_tag = b',s\x00\x00'
+        str_len = len(emote_name.encode('utf-8'))
+        length_bytes = str_len.to_bytes(4, 'big')
+        arg_bytes = emote_name.encode('utf-8')
+        arg_padded = arg_bytes + b'\x00' * ((4 - len(arg_bytes) % 4) % 4)
+        message = address_padded + type_tag + length_bytes + arg_padded
+        
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(message, (ip, port))
+        
+        print(f"OSC EMOTE SENT: '{emote_name}' to {ip}:{port} {address}")
+        return True
+    except Exception as e:
+        print(f"OSC emote failed: {e}")
+        return False
 
 
 @app.route('/api/recall', methods=['POST'])

@@ -45,6 +45,7 @@ class ControlPanel(ctk.CTk):
         self.tts_tab = self.tabview.add("TTS")
         self.audio_tab = self.tabview.add("Audio")
         self.music_tab = self.tabview.add("Music Requests")
+        self.neurosync_tab = self.tabview.add("Neurosync")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_llm_tab()
@@ -52,6 +53,7 @@ class ControlPanel(ctk.CTk):
         self.build_tts_tab()
         self.build_audio_tab()
         self.build_music_tab()
+        self.build_neurosync_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -794,6 +796,226 @@ class ControlPanel(ctk.CTk):
                 print("Background song stopped")
         except Exception as e:
             print(f"Failed to stop background song: {e}")
+    
+    # ==================== NEUROSYNC TAB ====================
+    def build_neurosync_tab(self):
+        """Build the Neurosync tab with blendshape and OSC emote controls"""
+        title = ctk.CTkLabel(self.neurosync_tab, text="Neurosync", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+        
+        # Scrollable frame
+        scroll_frame = ctk.CTkScrollableFrame(self.neurosync_tab)
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # --- Blendshape Controls ---
+        bs_section = ctk.CTkLabel(scroll_frame, text="Blendshape Intensity Controls", font=ctk.CTkFont(size=16, weight="bold"))
+        bs_section.pack(anchor="w", pady=(5, 5))
+        
+        bs_info = ctk.CTkLabel(scroll_frame, text="Adjust facial expression intensity (values > 1.0 will be clamped to 1.0)", font=ctk.CTkFont(size=12))
+        bs_info.pack(anchor="w", pady=(0, 10))
+        
+        # Mouth scale
+        mouth_label = ctk.CTkLabel(scroll_frame, text="Mouth Scale:", font=ctk.CTkFont(size=13))
+        mouth_label.pack(anchor="w")
+        self.mouth_scale_slider = ctk.CTkSlider(scroll_frame, from_=0.5, to=2.0, number_of_steps=30, command=self.update_mouth_label)
+        self.mouth_scale_slider.pack(fill="x", pady=(0, 5))
+        self.mouth_scale_value = ctk.CTkLabel(scroll_frame, text="1.0", font=ctk.CTkFont(size=12))
+        self.mouth_scale_value.pack(anchor="e")
+        
+        # Eye scale
+        eye_label = ctk.CTkLabel(scroll_frame, text="Eye Scale:", font=ctk.CTkFont(size=13))
+        eye_label.pack(anchor="w", pady=(10, 0))
+        self.eye_scale_slider = ctk.CTkSlider(scroll_frame, from_=0.5, to=2.0, number_of_steps=30, command=self.update_eye_label)
+        self.eye_scale_slider.pack(fill="x", pady=(0, 5))
+        self.eye_scale_value = ctk.CTkLabel(scroll_frame, text="1.0", font=ctk.CTkFont(size=12))
+        self.eye_scale_value.pack(anchor="e")
+        
+        # Eyebrow scale
+        eyebrow_label = ctk.CTkLabel(scroll_frame, text="Eyebrow Scale:", font=ctk.CTkFont(size=13))
+        eyebrow_label.pack(anchor="w", pady=(10, 0))
+        self.eyebrow_scale_slider = ctk.CTkSlider(scroll_frame, from_=0.3, to=1.5, number_of_steps=24, command=self.update_eyebrow_label)
+        self.eyebrow_scale_slider.pack(fill="x", pady=(0, 5))
+        self.eyebrow_scale_value = ctk.CTkLabel(scroll_frame, text="0.6", font=ctk.CTkFont(size=12))
+        self.eyebrow_scale_value.pack(anchor="e")
+        
+        # EyeWide scale
+        eyewide_label = ctk.CTkLabel(scroll_frame, text="EyeWide Scale:", font=ctk.CTkFont(size=13))
+        eyewide_label.pack(anchor="w", pady=(10, 0))
+        self.eyewide_scale_slider = ctk.CTkSlider(scroll_frame, from_=0.1, to=1.0, number_of_steps=18, command=self.update_eyewide_label)
+        self.eyewide_scale_slider.pack(fill="x", pady=(0, 5))
+        self.eyewide_scale_value = ctk.CTkLabel(scroll_frame, text="0.4", font=ctk.CTkFont(size=12))
+        self.eyewide_scale_value.pack(anchor="e")
+        
+        # EyeSquint scale
+        eyesquint_label = ctk.CTkLabel(scroll_frame, text="EyeSquint Scale:", font=ctk.CTkFont(size=13))
+        eyesquint_label.pack(anchor="w", pady=(10, 0))
+        self.eyesquint_scale_slider = ctk.CTkSlider(scroll_frame, from_=0.5, to=2.0, number_of_steps=30, command=self.update_eyesquint_label)
+        self.eyesquint_scale_slider.pack(fill="x", pady=(0, 5))
+        self.eyesquint_scale_value = ctk.CTkLabel(scroll_frame, text="1.0", font=ctk.CTkFont(size=12))
+        self.eyesquint_scale_value.pack(anchor="e")
+        
+        save_bs_btn = ctk.CTkButton(scroll_frame, text="Save Blendshape Settings", command=self.save_blendshape_settings)
+        save_bs_btn.pack(pady=15)
+        
+        # --- OSC Emote Controls ---
+        emote_section = ctk.CTkLabel(scroll_frame, text="OSC Emote Controls", font=ctk.CTkFont(size=16, weight="bold"))
+        emote_section.pack(anchor="w", pady=(15, 5))
+        
+        # OSC config
+        osc_config_frame = ctk.CTkFrame(scroll_frame)
+        osc_config_frame.pack(fill="x", pady=5)
+        
+        ip_label = ctk.CTkLabel(osc_config_frame, text="IP:", font=ctk.CTkFont(size=13))
+        ip_label.pack(side="left", padx=(10, 5), pady=10)
+        self.osc_ip_entry = ctk.CTkEntry(osc_config_frame, width=120)
+        self.osc_ip_entry.pack(side="left", padx=5, pady=10)
+        
+        port_label = ctk.CTkLabel(osc_config_frame, text="Port:", font=ctk.CTkFont(size=13))
+        port_label.pack(side="left", padx=(10, 5), pady=10)
+        self.osc_port_entry = ctk.CTkEntry(osc_config_frame, width=70)
+        self.osc_port_entry.pack(side="left", padx=5, pady=10)
+        
+        address_label = ctk.CTkLabel(osc_config_frame, text="Address:", font=ctk.CTkFont(size=13))
+        address_label.pack(side="left", padx=(10, 5), pady=10)
+        self.osc_address_entry = ctk.CTkEntry(osc_config_frame, width=140)
+        self.osc_address_entry.pack(side="left", padx=5, pady=10)
+        
+        save_osc_btn = ctk.CTkButton(osc_config_frame, text="Save OSC", width=80, command=self.save_osc_settings)
+        save_osc_btn.pack(side="left", padx=10, pady=10)
+        
+        # Quick emote buttons
+        emote_label = ctk.CTkLabel(scroll_frame, text="Quick Emote Buttons:", font=ctk.CTkFont(size=13))
+        emote_label.pack(anchor="w", pady=(10, 5))
+        
+        emote_names = ["Wave", "Hello", "Yes", "No", "Happy", "Sad", "Angry", "Surprised"]
+        
+        emote_row1 = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        emote_row1.pack(fill="x", pady=5)
+        for emote in emote_names[:4]:
+            btn = ctk.CTkButton(emote_row1, text=emote, width=80, command=lambda e=emote: self.send_test_emote(e))
+            btn.pack(side="left", padx=5)
+        
+        emote_row2 = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        emote_row2.pack(fill="x", pady=5)
+        for emote in emote_names[4:]:
+            btn = ctk.CTkButton(emote_row2, text=emote, width=80, command=lambda e=emote: self.send_test_emote(e))
+            btn.pack(side="left", padx=5)
+        
+        # Custom emote
+        custom_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        custom_frame.pack(fill="x", pady=10)
+        
+        custom_label = ctk.CTkLabel(custom_frame, text="Custom Emote:", font=ctk.CTkFont(size=13))
+        custom_label.pack(side="left", padx=(0, 5))
+        self.custom_emote_entry = ctk.CTkEntry(custom_frame, width=200)
+        self.custom_emote_entry.pack(side="left", padx=5)
+        custom_btn = ctk.CTkButton(custom_frame, text="Send", width=60, command=self.send_custom_emote)
+        custom_btn.pack(side="left", padx=5)
+        
+        self.emote_status_label = ctk.CTkLabel(scroll_frame, text="", font=ctk.CTkFont(size=12))
+        self.emote_status_label.pack(anchor="w", pady=10)
+        
+        # Load current settings
+        self.load_neurosync_settings()
+    
+    def update_mouth_label(self, value):
+        self.mouth_scale_value.configure(text=f"{value:.2f}")
+    
+    def update_eye_label(self, value):
+        self.eye_scale_value.configure(text=f"{value:.2f}")
+    
+    def update_eyebrow_label(self, value):
+        self.eyebrow_scale_value.configure(text=f"{value:.2f}")
+    
+    def update_eyewide_label(self, value):
+        self.eyewide_scale_value.configure(text=f"{value:.2f}")
+    
+    def update_eyesquint_label(self, value):
+        self.eyesquint_scale_value.configure(text=f"{value:.2f}")
+    
+    def load_neurosync_settings(self):
+        """Load Neurosync settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                neuro = data.get('neurosync', {})
+                
+                self.mouth_scale_slider.set(neuro.get('mouth_scale', 1.0))
+                self.mouth_scale_value.configure(text=f"{neuro.get('mouth_scale', 1.0):.2f}")
+                
+                self.eye_scale_slider.set(neuro.get('eye_scale', 1.0))
+                self.eye_scale_value.configure(text=f"{neuro.get('eye_scale', 1.0):.2f}")
+                
+                self.eyebrow_scale_slider.set(neuro.get('eyebrow_scale', 0.6))
+                self.eyebrow_scale_value.configure(text=f"{neuro.get('eyebrow_scale', 0.6):.2f}")
+                
+                self.eyewide_scale_slider.set(neuro.get('eyewide_scale', 0.4))
+                self.eyewide_scale_value.configure(text=f"{neuro.get('eyewide_scale', 0.4):.2f}")
+                
+                self.eyesquint_scale_slider.set(neuro.get('eyesquint_scale', 1.0))
+                self.eyesquint_scale_value.configure(text=f"{neuro.get('eyesquint_scale', 1.0):.2f}")
+                
+                osc = neuro.get('osc', {})
+                self.osc_ip_entry.delete(0, "end")
+                self.osc_ip_entry.insert(0, osc.get('ip', '127.0.0.1'))
+                self.osc_port_entry.delete(0, "end")
+                self.osc_port_entry.insert(0, str(osc.get('port', 10000)))
+                self.osc_address_entry.delete(0, "end")
+                self.osc_address_entry.insert(0, osc.get('address', '/chat/message'))
+        except Exception as e:
+            print(f"Failed to load Neurosync settings: {e}")
+    
+    def save_blendshape_settings(self):
+        """Save blendshape settings to server"""
+        try:
+            payload = {
+                'blendshape_mouth_scale': round(self.mouth_scale_slider.get(), 2),
+                'blendshape_eye_scale': round(self.eye_scale_slider.get(), 2),
+                'blendshape_eyebrow_scale': round(self.eyebrow_scale_slider.get(), 2),
+                'blendshape_eyewide_scale': round(self.eyewide_scale_slider.get(), 2),
+                'blendshape_eyesquint_scale': round(self.eyesquint_scale_slider.get(), 2)
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Blendshape settings saved")
+        except Exception as e:
+            print(f"Failed to save blendshape settings: {e}")
+    
+    def save_osc_settings(self):
+        """Save OSC settings to server"""
+        try:
+            payload = {
+                'osc_ip': self.osc_ip_entry.get().strip(),
+                'osc_port': int(self.osc_port_entry.get().strip()),
+                'osc_address': self.osc_address_entry.get().strip()
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                self.emote_status_label.configure(text="OSC settings saved!", text_color="green")
+                print("✓ OSC settings saved")
+        except Exception as e:
+            self.emote_status_label.configure(text="Save failed!", text_color="red")
+            print(f"Failed to save OSC settings: {e}")
+    
+    def send_test_emote(self, emote_name):
+        """Send a test emote via OSC"""
+        try:
+            response = httpx.post(
+                f"{SERVER_URL}/api/osc/emote",
+                json={"emote": emote_name},
+                timeout=5
+            )
+            if response.status_code == 200:
+                self.emote_status_label.configure(text=f"✅ Sent emote: '{emote_name}'", text_color="green")
+        except Exception as e:
+            self.emote_status_label.configure(text=f"Failed: {e}", text_color="red")
+    
+    def send_custom_emote(self):
+        """Send a custom emote"""
+        emote = self.custom_emote_entry.get().strip()
+        if emote:
+            self.send_test_emote(emote)
     
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):

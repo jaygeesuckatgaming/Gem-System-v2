@@ -33,6 +33,10 @@ music/requests/*.mkv
 music/requests/karaoke/*.wav
 background_songs/*.mp3
 
+# Neurosync (separate git repos)
+Neurosync/NeuroSync_Local_API/
+Neurosync/NeuroSync_Player/
+
 # OS
 .DS_Store
 Thumbs.db
