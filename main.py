@@ -71,6 +71,8 @@ def load_persisted_settings():
             config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
         if 'audio_duck_release_ms' in data:
             config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+        if 'osc_actions' in data:
+            config.OSC_ACTIONS = data['osc_actions']
     except Exception as e:
         print(f"Failed to load settings.json: {e}")
 
@@ -91,7 +93,8 @@ def save_persisted_settings():
             'audio_ducking_enabled': config.AUDIO_DUCKING_ENABLED,
             'audio_duck_amount': config.AUDIO_DUCK_AMOUNT,
             'audio_duck_attack_ms': config.AUDIO_DUCK_ATTACK_MS,
-            'audio_duck_release_ms': config.AUDIO_DUCK_RELEASE_MS
+            'audio_duck_release_ms': config.AUDIO_DUCK_RELEASE_MS,
+            'osc_actions': config.OSC_ACTIONS
         }
         with open(SETTINGS_FILE, "w") as f:
             json.dump(data, f, indent=2)
@@ -189,6 +192,16 @@ async def handle_incoming_message(data: dict):
         
         music.download_song(song_name)
         await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for custom OSC action (intercept before LLM)
+    osc_action = match_osc_action(message)
+    if osc_action:
+        print(f"🎛️ OSC action detected: '{osc_action.get('phrase')}'")
+        address = osc_action.get('address', config.OSC_ADDRESS)
+        value = osc_action.get('value', '')
+        send_osc_message(address, value)
+        await ssn.send_message(f"🎛️ Done! {osc_action.get('phrase')}", targets=config.SSN_TARGETS)
         return
     
     # Store user message in memory
@@ -408,10 +421,28 @@ async def api_update_settings():
         config.OSC_PORT = data['osc_port']
     if 'osc_address' in data:
         config.OSC_ADDRESS = data['osc_address']
+    if 'osc_actions' in data:
+        config.OSC_ACTIONS = data['osc_actions']
     
     # Persist TTS settings to file
     save_persisted_settings()
     
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/osc/actions', methods=['GET'])
+async def api_osc_actions_get():
+    """Get custom OSC actions"""
+    return jsonify({'status': 'ok', 'actions': config.OSC_ACTIONS})
+
+
+@app.route('/api/osc/actions', methods=['POST'])
+async def api_osc_actions_set():
+    """Set custom OSC actions"""
+    data = await request.get_json()
+    actions = data.get('actions', [])
+    config.OSC_ACTIONS = actions
+    save_persisted_settings()
     return jsonify({'status': 'ok'})
 
 
@@ -429,31 +460,48 @@ async def api_osc_emote():
 
 def send_osc_emote(emote_name: str) -> bool:
     """Send an emote via OSC (UDP)"""
+    return send_osc_message(config.OSC_ADDRESS, emote_name)
+
+
+def send_osc_message(address: str, value) -> bool:
+    """Send a generic OSC message (UDP) with a string value"""
     import socket
     
     try:
         ip = config.OSC_IP
         port = config.OSC_PORT
-        address = config.OSC_ADDRESS
         
         # Build OSC message
         address_bytes = address.encode('utf-8')
         address_padded = address_bytes + b'\x00' * ((4 - len(address_bytes) % 4) % 4)
         type_tag = b',s\x00\x00'
-        str_len = len(emote_name.encode('utf-8'))
+        value_str = str(value)
+        str_len = len(value_str.encode('utf-8'))
         length_bytes = str_len.to_bytes(4, 'big')
-        arg_bytes = emote_name.encode('utf-8')
+        arg_bytes = value_str.encode('utf-8')
         arg_padded = arg_bytes + b'\x00' * ((4 - len(arg_bytes) % 4) % 4)
         message = address_padded + type_tag + length_bytes + arg_padded
         
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.sendto(message, (ip, port))
         
-        print(f"OSC EMOTE SENT: '{emote_name}' to {ip}:{port} {address}")
+        print(f"OSC SENT: '{value_str}' to {ip}:{port} {address}")
         return True
     except Exception as e:
-        print(f"OSC emote failed: {e}")
+        print(f"OSC failed: {e}")
         return False
+
+
+def match_osc_action(text: str):
+    """Match a message against custom OSC actions.
+    Returns the matched action dict, or None.
+    """
+    text_lower = text.lower().strip()
+    for action in config.OSC_ACTIONS:
+        phrase = action.get('phrase', '').lower().strip()
+        if phrase and phrase in text_lower:
+            return action
+    return None
 
 
 @app.route('/api/recall', methods=['POST'])

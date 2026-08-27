@@ -47,6 +47,7 @@ class ControlPanel(ctk.CTk):
         self.audio_tab = self.tabview.add("Audio")
         self.music_tab = self.tabview.add("Music Requests")
         self.neurosync_tab = self.tabview.add("Neurosync")
+        self.osc_tab = self.tabview.add("OSC")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_status_tab()
@@ -56,6 +57,7 @@ class ControlPanel(ctk.CTk):
         self.build_audio_tab()
         self.build_music_tab()
         self.build_neurosync_tab()
+        self.build_osc_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -1051,6 +1053,93 @@ class ControlPanel(ctk.CTk):
         emote = self.custom_emote_entry.get().strip()
         if emote:
             self.send_test_emote(emote)
+    
+    # ==================== OSC TAB ====================
+    def build_osc_tab(self):
+        """Build the OSC tab for custom actions"""
+        title = ctk.CTkLabel(self.osc_tab, text="OSC Custom Actions", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+        
+        info = ctk.CTkLabel(
+            self.osc_tab,
+            text="Map chat phrases to OSC commands. E.g. 'turn off light 1' → address '/light/1' value 'off'",
+            font=ctk.CTkFont(size=12)
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+        
+        # Scrollable frame for actions list
+        self.osc_actions_frame = ctk.CTkScrollableFrame(self.osc_tab)
+        self.osc_actions_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # Add action button
+        add_btn = ctk.CTkButton(self.osc_tab, text="+ Add Action", command=self.add_osc_action_row)
+        add_btn.pack(pady=10)
+        
+        # Save button
+        save_btn = ctk.CTkButton(self.osc_tab, text="Save Actions", command=self.save_osc_actions)
+        save_btn.pack(pady=10)
+        
+        # Load existing actions
+        self.load_osc_actions()
+    
+    def add_osc_action_row(self, phrase="", address="", value=""):
+        """Add a new OSC action row"""
+        row = ctk.CTkFrame(self.osc_actions_frame)
+        row.pack(fill="x", pady=5)
+        
+        phrase_entry = ctk.CTkEntry(row, placeholder_text="Phrase (e.g. turn off light 1)", width=250)
+        phrase_entry.pack(side="left", padx=5, pady=5)
+        phrase_entry.insert(0, phrase)
+        
+        address_entry = ctk.CTkEntry(row, placeholder_text="OSC Address (e.g. /light/1)", width=200)
+        address_entry.pack(side="left", padx=5, pady=5)
+        address_entry.insert(0, address)
+        
+        value_entry = ctk.CTkEntry(row, placeholder_text="Value (e.g. off)", width=120)
+        value_entry.pack(side="left", padx=5, pady=5)
+        value_entry.insert(0, value)
+        
+        delete_btn = ctk.CTkButton(row, text="✕", width=30, fg_color="red", hover_color="darkred", command=lambda: row.destroy())
+        delete_btn.pack(side="left", padx=5, pady=5)
+    
+    def load_osc_actions(self):
+        """Load existing OSC actions from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/osc/actions", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                actions = data.get('actions', [])
+                for action in actions:
+                    self.add_osc_action_row(
+                        phrase=action.get('phrase', ''),
+                        address=action.get('address', ''),
+                        value=action.get('value', '')
+                    )
+        except Exception as e:
+            print(f"Failed to load OSC actions: {e}")
+    
+    def save_osc_actions(self):
+        """Save OSC actions to server"""
+        actions = []
+        for row in self.osc_actions_frame.winfo_children():
+            entries = [w for w in row.winfo_children() if isinstance(w, ctk.CTkEntry)]
+            if len(entries) >= 3:
+                phrase = entries[0].get().strip()
+                address = entries[1].get().strip()
+                value = entries[2].get().strip()
+                if phrase and address:
+                    actions.append({
+                        'phrase': phrase,
+                        'address': address,
+                        'value': value
+                    })
+        
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/osc/actions", json={"actions": actions}, timeout=5)
+            if response.status_code == 200:
+                print(f"✓ Saved {len(actions)} OSC actions")
+        except Exception as e:
+            print(f"Failed to save OSC actions: {e}")
     
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):
