@@ -7,3 +7,4 @@ customtkinter
 sounddevice
 pygame
 ytmusicapi
+playwright

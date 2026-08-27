@@ -18,6 +18,38 @@ COGNEE_SERVER_URL = "http://127.0.0.1:8011"
 # StyleTTS2
 TTS_ENABLED = False
 TTS_URL = "http://127.0.0.1:13300/tts"
+TTS_DIFFUSION_STEPS = 20
+TTS_EMBEDDING_SCALE = 1.0
+TTS_ALPHA = 0.3
+TTS_BETA = 0.7
+TTS_REFERENCE_VOICE = "../reference_voices/earn_lucky_pitch_minus_one_samplerate_24000_short.wav"
+
+# Audio Player (plays TTS output when not using Neurosync)
+AUDIO_PLAYER_ENABLED = True
+TTS_OUTPUT_PATH = "tts_output/server_output.wav"
+AUDIO_OUTPUT_DEVICE = ""  # Empty = system default
+
+# Audio Ducking (lower music volume when TTS speaks)
+AUDIO_DUCKING_ENABLED = False
+AUDIO_DUCK_AMOUNT = -15
+AUDIO_DUCK_ATTACK_MS = 100
+AUDIO_DUCK_RELEASE_MS = 500
+
+# Neurosync Blendshapes
+BLENDSHAPE_MOUTH_SCALE = 1.0
+BLENDSHAPE_EYE_SCALE = 1.0
+BLENDSHAPE_EYEBROW_SCALE = 0.6
+BLENDSHAPE_EYEWIDE_SCALE = 0.4
+BLENDSHAPE_EYESQUINT_SCALE = 1.0
+
+# OSC (emotes + movement)
+OSC_ENABLED = True
+OSC_IP = "127.0.0.1"
+OSC_PORT = 10000
+OSC_ADDRESS = "/chat/message"
+
+# Twitch Music Check (verify songs against Twitch DJ Program)
+TWITCH_MUSIC_CHECK_ENABLED = True
 
 # Server
 SERVER_HOST = "127.0.0.1"

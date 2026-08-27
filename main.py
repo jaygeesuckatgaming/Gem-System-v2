@@ -170,6 +170,20 @@ async def handle_incoming_message(data: dict):
     song_name = extract_song_command(message)
     if song_name:
         print(f"🎵 Song command detected: '{song_name}'")
+        
+        # Check Twitch DJ Program restrictions
+        if config.TWITCH_MUSIC_CHECK_ENABLED:
+            result = music.verify_song(song_name)
+            status = result.get('status', 'error')
+            
+            if status == 'restricted':
+                await ssn.send_message(result.get('message', "Sorry, that song is restricted."), targets=config.SSN_TARGETS)
+                return
+            elif status == 'error':
+                await ssn.send_message(result.get('message', "I couldn't identify that song."), targets=config.SSN_TARGETS)
+                return
+            # 'allowed' or 'not_found' -> proceed with download
+        
         music.download_song(song_name)
         await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
         return

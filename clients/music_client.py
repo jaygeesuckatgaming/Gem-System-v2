@@ -18,6 +18,7 @@ sys.path.insert(0, MUSIC_DIR)
 
 from song_library import SongLibrary
 from download_worker import run_download, is_youtube_url
+from twitch_music_checker import TwitchMusicChecker
 
 
 class MusicClient:
@@ -40,6 +41,9 @@ class MusicClient:
         self.current_download: Optional[str] = None
         self.download_history: List[str] = []
         self.enabled = False
+
+        # Twitch music checker
+        self.twitch_checker = TwitchMusicChecker()
 
         # Background song state
         self.background_song_path: Optional[str] = None
@@ -84,6 +88,12 @@ class MusicClient:
         thread = threading.Thread(target=self._download_worker, args=(query,), daemon=True)
         thread.start()
         return True
+
+    def verify_song(self, request_text: str) -> Dict:
+        """Check if a song is allowed under Twitch DJ Program.
+        Returns a dict with status, artist, track, and message.
+        """
+        return self.twitch_checker.verify_request(request_text)
 
     def _download_worker(self, query: str):
         """Background download worker"""
