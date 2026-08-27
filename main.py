@@ -449,6 +449,32 @@ async def api_music_play():
     return jsonify({'status': 'ok' if success else 'error'})
 
 
+@app.route('/api/music/background', methods=['GET'])
+async def api_music_background_list():
+    """List background songs"""
+    songs = music.list_background_songs()
+    status = music.get_background_status()
+    return jsonify({'status': 'ok', 'songs': songs, 'current': status['current']})
+
+
+@app.route('/api/music/background', methods=['POST'])
+async def api_music_background_set():
+    """Set background song"""
+    data = await request.get_json()
+    song_name = data.get('song', '')
+    if not song_name:
+        return jsonify({'status': 'error', 'error': 'No song specified'}), 400
+    success = music.set_background_song(song_name)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
+@app.route('/api/music/background/stop', methods=['POST'])
+async def api_music_background_stop():
+    """Stop background song"""
+    success = music.stop_background_song()
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
 @app.route('/chat', methods=['POST'])
 async def chat():
     """HTTP chat endpoint (alternative to WebSocket)"""

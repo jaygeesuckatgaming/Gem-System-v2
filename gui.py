@@ -642,9 +642,29 @@ class ControlPanel(ctk.CTk):
         play_btn = ctk.CTkButton(library_btn_frame, text="Play Selected", width=120, command=self.play_selected_song)
         play_btn.pack(side="left")
         
+        # --- Background Songs Section ---
+        bg_section = ctk.CTkLabel(scroll_frame, text="Background Music", font=ctk.CTkFont(size=16, weight="bold"))
+        bg_section.pack(anchor="w", pady=(15, 5))
+        
+        bg_frame = ctk.CTkFrame(scroll_frame)
+        bg_frame.pack(fill="x", pady=5)
+        
+        self.bg_song_combo = ctk.CTkComboBox(bg_frame, values=["No background songs"], width=400)
+        self.bg_song_combo.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+        
+        set_bg_btn = ctk.CTkButton(bg_frame, text="Set", width=60, command=self.set_background_song)
+        set_bg_btn.pack(side="left", padx=(0, 5), pady=10)
+        
+        stop_bg_btn = ctk.CTkButton(bg_frame, text="Stop", width=60, command=self.stop_background_song)
+        stop_bg_btn.pack(side="left", padx=(0, 10), pady=10)
+        
+        self.bg_status_label = ctk.CTkLabel(scroll_frame, text="Background: None", font=ctk.CTkFont(size=13))
+        self.bg_status_label.pack(anchor="w", pady=5)
+        
         # Load initial data
         self.refresh_music_library()
         self.refresh_music_queue()
+        self.refresh_background_songs()
     
     def download_song(self):
         """Download a song from the entry field"""
@@ -724,6 +744,56 @@ class ControlPanel(ctk.CTk):
                 print(f"Playing: {song_name}")
         except Exception as e:
             print(f"Failed to play song: {e}")
+    
+    def refresh_background_songs(self):
+        """Refresh the background songs list"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/music/background", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                songs = data.get('songs', [])
+                current = data.get('current')
+                
+                if songs:
+                    self.bg_song_combo.configure(values=songs)
+                    if current and current in songs:
+                        self.bg_song_combo.set(current)
+                    else:
+                        self.bg_song_combo.set(songs[0])
+                else:
+                    self.bg_song_combo.configure(values=["No background songs"])
+                    self.bg_song_combo.set("No background songs")
+                
+                if current:
+                    self.bg_status_label.configure(text=f"Background: {current}")
+                else:
+                    self.bg_status_label.configure(text="Background: None")
+        except Exception as e:
+            print(f"Failed to refresh background songs: {e}")
+    
+    def set_background_song(self):
+        """Set the selected background song"""
+        song_name = self.bg_song_combo.get()
+        if not song_name or song_name == "No background songs":
+            return
+        
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/music/background", json={"song": song_name}, timeout=5)
+            if response.status_code == 200:
+                self.bg_status_label.configure(text=f"Background: {song_name}")
+                print(f"Background song set: {song_name}")
+        except Exception as e:
+            print(f"Failed to set background song: {e}")
+    
+    def stop_background_song(self):
+        """Stop the background song"""
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/music/background/stop", timeout=5)
+            if response.status_code == 200:
+                self.bg_status_label.configure(text="Background: None")
+                print("Background song stopped")
+        except Exception as e:
+            print(f"Failed to stop background song: {e}")
     
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):

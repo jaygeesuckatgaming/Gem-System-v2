@@ -31,6 +31,7 @@ music/requests/*.mp4
 music/requests/*.webm
 music/requests/*.mkv
 music/requests/karaoke/*.wav
+background_songs/*.mp3
 
 # OS
 .DS_Store

@@ -32,11 +32,19 @@ class MusicClient:
             download_folder = os.path.join(MUSIC_DIR, "requests")
         self.download_folder = download_folder
 
+        # Background songs folder
+        self.background_folder = os.path.join(PROJECT_ROOT, "background_songs")
+
         self.device_name = device_name
         self.queue: List[str] = []
         self.current_download: Optional[str] = None
         self.download_history: List[str] = []
         self.enabled = False
+
+        # Background song state
+        self.background_song_path: Optional[str] = None
+        self.background_song_paused = False
+        self.background_resume_time = 0.0
 
     def check_connection(self) -> bool:
         """Check if music system is ready"""
@@ -168,6 +176,60 @@ class MusicClient:
         thread = threading.Thread(target=self._play_mp3, args=(filepath,), daemon=True)
         thread.start()
         return True
+
+    # ==================== BACKGROUND SONGS ====================
+    def list_background_songs(self) -> List[str]:
+        """List available background songs"""
+        if not os.path.isdir(self.background_folder):
+            return []
+        return sorted([f for f in os.listdir(self.background_folder) if f.endswith('.mp3')])
+
+    def set_background_song(self, song_name: str) -> bool:
+        """Set and start playing a background song (looping)"""
+        filepath = os.path.join(self.background_folder, song_name)
+        if not os.path.exists(filepath):
+            print(f"❌ Background song not found: {song_name}")
+            return False
+
+        self.background_song_path = filepath
+        self.background_song_paused = False
+        print(f"🎵 Set background song: {song_name}")
+
+        thread = threading.Thread(target=self._play_background_loop, args=(filepath,), daemon=True)
+        thread.start()
+        return True
+
+    def _play_background_loop(self, filepath: str):
+        """Play background song in a loop"""
+        try:
+            import pygame
+            pygame.mixer.init()
+            pygame.mixer.music.load(filepath)
+            pygame.mixer.music.play(loops=-1)
+            print(f"🎵 Background music playing (looping)")
+        except Exception as e:
+            print(f"✗ Background playback error: {e}")
+
+    def stop_background_song(self) -> bool:
+        """Stop the background song"""
+        try:
+            import pygame
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+            self.background_song_path = None
+            self.background_song_paused = False
+            print("🎵 Background music stopped")
+            return True
+        except Exception as e:
+            print(f"✗ Stop background error: {e}")
+            return False
+
+    def get_background_status(self) -> Dict:
+        """Get background song status"""
+        return {
+            'current': os.path.basename(self.background_song_path) if self.background_song_path else None,
+            'paused': self.background_song_paused
+        }
 
     def get_download_status(self) -> Dict:
         """Get current download status"""
