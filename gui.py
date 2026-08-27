@@ -367,6 +367,11 @@ class ControlPanel(ctk.CTk):
         self._current_device = ""
         self._current_input_device = ""
         self._is_testing_output = False
+        self._is_monitoring_input = False
+        self._input_stream = None
+        self._input_smoothed_db = MIN_DB
+        self._input_peak_db = MIN_DB
+        self._input_peak_hold_time = time.time()
         self._output_stream = None
         self._output_start_idx = 0
         self._output_smoothed_db = MIN_DB
@@ -418,13 +423,23 @@ class ControlPanel(ctk.CTk):
         self.audio_input_combo.pack(fill="x", pady=(0, 5))
         
         input_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-        input_btn_frame.pack(fill="x", pady=(0, 15))
+        input_btn_frame.pack(fill="x", pady=(0, 5))
         
         refresh_input_btn = ctk.CTkButton(input_btn_frame, text="Refresh Input Devices", width=180, command=self.refresh_input_devices)
         refresh_input_btn.pack(side="left", padx=(0, 10))
         
         save_input_btn = ctk.CTkButton(input_btn_frame, text="Save Input Device", width=150, command=self.save_input_device)
-        save_input_btn.pack(side="left")
+        save_input_btn.pack(side="left", padx=(0, 10))
+        
+        self.monitor_input_btn = ctk.CTkButton(input_btn_frame, text="Monitor", width=100, command=self.toggle_input_monitor)
+        self.monitor_input_btn.pack(side="left")
+        
+        # Input VU meter
+        input_vu_label = ctk.CTkLabel(scroll_frame, text="Input VU Meter:", font=ctk.CTkFont(size=13))
+        input_vu_label.pack(anchor="w", pady=(10, 0))
+        
+        self.input_vu_canvas = ctk.CTkCanvas(scroll_frame, height=30, bg="#1a1a1a", highlightthickness=0)
+        self.input_vu_canvas.pack(fill="x", pady=(0, 15))
         
         # --- Audio Ducking ---
         ducking_section = ctk.CTkLabel(scroll_frame, text="Audio Ducking", font=ctk.CTkFont(size=16, weight="bold"))
@@ -722,8 +737,118 @@ class ControlPanel(ctk.CTk):
         
         canvas.create_text(width - 10, height / 2, text=f"{smoothed_db:.1f} dB", anchor="e", fill="white")
         
+        # Update input VU meter
+        self._update_input_vu_meter()
+        
         # Schedule next update
         self.after(50, self.update_vu_meter)
+    
+    # ==================== INPUT MONITOR ====================
+    def _get_selected_input_device_id(self):
+        """Extract input device ID from the selected combo value"""
+        selected = self.audio_input_combo.get()
+        if selected == "None" or '[' not in selected:
+            return None
+        try:
+            return int(selected.split(']')[0].strip('['))
+        except Exception:
+            return None
+    
+    def toggle_input_monitor(self):
+        """Start/stop monitoring the input device"""
+        if getattr(self, '_is_monitoring_input', False):
+            self.stop_input_monitor()
+        else:
+            self.start_input_monitor()
+    
+    def start_input_monitor(self):
+        """Start monitoring the selected input device"""
+        device_id = self._get_selected_input_device_id()
+        if device_id is None:
+            print("No valid input device selected for monitoring")
+            return
+        
+        self._is_monitoring_input = True
+        self._input_smoothed_db = MIN_DB
+        self._input_peak_db = MIN_DB
+        self._input_peak_hold_time = time.time()
+        self.monitor_input_btn.configure(text="Stop")
+        
+        try:
+            samplerate = sd.query_devices(device_id, 'input')['default_samplerate']
+            self._input_stream = sd.InputStream(
+                device=device_id, channels=1, samplerate=samplerate,
+                callback=self._input_audio_callback
+            )
+            self._input_stream.start()
+            print(f"Input monitor started on device {device_id}")
+        except Exception as e:
+            print(f"Error starting input monitor: {e}")
+            self.stop_input_monitor()
+    
+    def stop_input_monitor(self):
+        """Stop monitoring the input device"""
+        if getattr(self, '_input_stream', None):
+            try:
+                self._input_stream.close()
+            except Exception:
+                pass
+        self._input_stream = None
+        self._is_monitoring_input = False
+        self.monitor_input_btn.configure(text="Monitor")
+        self._input_smoothed_db = MIN_DB
+        self._input_peak_db = MIN_DB
+    
+    def _input_audio_callback(self, indata, frames, time_info, status):
+        """Measure input level"""
+        rms = np.sqrt(np.mean(indata[:] ** 2))
+        current_db = 20 * math.log10(rms) if rms > 0 else MIN_DB
+        
+        self._input_smoothed_db = (SMOOTHING_FACTOR * self._input_smoothed_db) + ((1 - SMOOTHING_FACTOR) * current_db)
+        if self._input_smoothed_db > self._input_peak_db:
+            self._input_peak_db = self._input_smoothed_db
+            self._input_peak_hold_time = time.time()
+    
+    def _update_input_vu_meter(self):
+        """Update the input VU meter canvas"""
+        if not hasattr(self, 'input_vu_canvas'):
+            return
+        
+        # Decay peak hold
+        if getattr(self, '_is_monitoring_input', False):
+            if time.time() - getattr(self, '_input_peak_hold_time', time.time()) > PEAK_HOLD_DURATION:
+                self._input_peak_db = max(self._input_smoothed_db, self._input_peak_db - 2)
+        else:
+            self._input_smoothed_db = max(MIN_DB, self._input_smoothed_db - 3)
+            self._input_peak_db = max(self._input_smoothed_db, self._input_peak_db - 3)
+        
+        canvas = self.input_vu_canvas
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
+            return
+        
+        canvas.delete("all")
+        
+        smoothed_db = getattr(self, '_input_smoothed_db', MIN_DB)
+        peak_db = getattr(self, '_input_peak_db', MIN_DB)
+        
+        bar_len = int(((max(MIN_DB, min(smoothed_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        green_w = int(width * 0.7)
+        yellow_w = int(width * 0.9)
+        
+        if bar_len > 0:
+            canvas.create_rectangle(0, 0, min(bar_len, green_w), height, fill="#4CAF50", width=0)
+        if bar_len > green_w:
+            canvas.create_rectangle(green_w, 0, min(bar_len, yellow_w), height, fill="#FFC107", width=0)
+        if bar_len > yellow_w:
+            canvas.create_rectangle(yellow_w, 0, bar_len, height, fill="#F44336", width=0)
+        
+        peak_pos = int(((max(MIN_DB, min(peak_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        if peak_pos > 1:
+            canvas.create_line(peak_pos, 0, peak_pos, height, fill="white", width=2)
+        
+        canvas.create_text(width - 10, height / 2, text=f"{smoothed_db:.1f} dB", anchor="e", fill="white")
     
     # ==================== MUSIC TAB ====================
     def build_music_tab(self):
@@ -1646,6 +1771,8 @@ class ControlPanel(ctk.CTk):
         self.polling = False
         if getattr(self, '_is_testing_output', False):
             self.stop_output_test()
+        if getattr(self, '_is_monitoring_input', False):
+            self.stop_input_monitor()
         self.destroy()
 
 
