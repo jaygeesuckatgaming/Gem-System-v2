@@ -44,12 +44,14 @@ class ControlPanel(ctk.CTk):
         self.memory_tab = self.tabview.add("Memory")
         self.tts_tab = self.tabview.add("TTS")
         self.audio_tab = self.tabview.add("Audio")
+        self.music_tab = self.tabview.add("Music Requests")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_llm_tab()
         self.build_memory_tab()
         self.build_tts_tab()
         self.build_audio_tab()
+        self.build_music_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -578,6 +580,150 @@ class ControlPanel(ctk.CTk):
         
         # Schedule next update
         self.after(50, self.update_vu_meter)
+    
+    # ==================== MUSIC TAB ====================
+    def build_music_tab(self):
+        """Build the Music Requests tab"""
+        title = ctk.CTkLabel(self.music_tab, text="Music Requests", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+        
+        # Scrollable frame
+        scroll_frame = ctk.CTkScrollableFrame(self.music_tab)
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # --- Download Section ---
+        download_section = ctk.CTkLabel(scroll_frame, text="Download Song", font=ctk.CTkFont(size=16, weight="bold"))
+        download_section.pack(anchor="w", pady=(5, 10))
+        
+        download_frame = ctk.CTkFrame(scroll_frame)
+        download_frame.pack(fill="x", pady=5)
+        
+        self.music_download_entry = ctk.CTkEntry(download_frame, placeholder_text="Song name or YouTube URL")
+        self.music_download_entry.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+        
+        download_btn = ctk.CTkButton(download_frame, text="Download", width=100, command=self.download_song)
+        download_btn.pack(side="right", padx=10, pady=10)
+        
+        # Download status
+        self.music_status_label = ctk.CTkLabel(scroll_frame, text="Status: Idle", font=ctk.CTkFont(size=13))
+        self.music_status_label.pack(anchor="w", pady=5)
+        
+        # --- Queue Section ---
+        queue_section = ctk.CTkLabel(scroll_frame, text="Song Queue", font=ctk.CTkFont(size=16, weight="bold"))
+        queue_section.pack(anchor="w", pady=(15, 5))
+        
+        self.music_queue_textbox = ctk.CTkTextbox(scroll_frame, height=100)
+        self.music_queue_textbox.pack(fill="x", pady=5)
+        self.music_queue_textbox.configure(state="disabled")
+        
+        queue_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        queue_btn_frame.pack(fill="x", pady=5)
+        
+        clear_queue_btn = ctk.CTkButton(queue_btn_frame, text="Clear Queue", width=120, command=self.clear_music_queue)
+        clear_queue_btn.pack(side="left", padx=(0, 10))
+        
+        refresh_queue_btn = ctk.CTkButton(queue_btn_frame, text="Refresh", width=100, command=self.refresh_music_queue)
+        refresh_queue_btn.pack(side="left")
+        
+        # --- Library Section ---
+        library_section = ctk.CTkLabel(scroll_frame, text="Song Library (Karaoke)", font=ctk.CTkFont(size=16, weight="bold"))
+        library_section.pack(anchor="w", pady=(15, 5))
+        
+        self.music_library_textbox = ctk.CTkTextbox(scroll_frame, height=150)
+        self.music_library_textbox.pack(fill="x", pady=5)
+        self.music_library_textbox.configure(state="disabled")
+        
+        library_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        library_btn_frame.pack(fill="x", pady=5)
+        
+        refresh_library_btn = ctk.CTkButton(library_btn_frame, text="Refresh Library", width=140, command=self.refresh_music_library)
+        refresh_library_btn.pack(side="left", padx=(0, 10))
+        
+        play_btn = ctk.CTkButton(library_btn_frame, text="Play Selected", width=120, command=self.play_selected_song)
+        play_btn.pack(side="left")
+        
+        # Load initial data
+        self.refresh_music_library()
+        self.refresh_music_queue()
+    
+    def download_song(self):
+        """Download a song from the entry field"""
+        query = self.music_download_entry.get().strip()
+        if not query:
+            return
+        
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/music/download", json={"query": query}, timeout=5)
+            if response.status_code == 200:
+                self.music_status_label.configure(text=f"Status: Downloading '{query}'...")
+                self.music_download_entry.delete(0, "end")
+        except Exception as e:
+            print(f"Download failed: {e}")
+    
+    def refresh_music_queue(self):
+        """Refresh the song queue display"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/music/queue", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                queue = data.get('queue', [])
+                
+                self.music_queue_textbox.configure(state="normal")
+                self.music_queue_textbox.delete("1.0", "end")
+                if queue:
+                    for i, song in enumerate(queue, 1):
+                        self.music_queue_textbox.insert("end", f"{i}. {song}\n")
+                else:
+                    self.music_queue_textbox.insert("end", "Queue is empty")
+                self.music_queue_textbox.configure(state="disabled")
+        except Exception as e:
+            print(f"Failed to refresh queue: {e}")
+    
+    def clear_music_queue(self):
+        """Clear the song queue"""
+        try:
+            response = httpx.delete(f"{SERVER_URL}/api/music/queue", timeout=5)
+            if response.status_code == 200:
+                self.refresh_music_queue()
+        except Exception as e:
+            print(f"Failed to clear queue: {e}")
+    
+    def refresh_music_library(self):
+        """Refresh the song library display"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/music/songs", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                songs = data.get('songs', [])
+                
+                self.music_library_textbox.configure(state="normal")
+                self.music_library_textbox.delete("1.0", "end")
+                if songs:
+                    for song in songs:
+                        self.music_library_textbox.insert("end", f"• {song}\n")
+                else:
+                    self.music_library_textbox.insert("end", "No songs in library")
+                self.music_library_textbox.configure(state="disabled")
+        except Exception as e:
+            print(f"Failed to refresh library: {e}")
+    
+    def play_selected_song(self):
+        """Play the selected song from the library"""
+        try:
+            # Get selected text from library textbox
+            selected = self.music_library_textbox.get("sel.first", "sel.last").strip()
+            if not selected:
+                print("No song selected")
+                return
+            
+            # Remove bullet point
+            song_name = selected.lstrip("• ").strip()
+            
+            response = httpx.post(f"{SERVER_URL}/api/music/play", json={"song": song_name}, timeout=5)
+            if response.status_code == 200:
+                print(f"Playing: {song_name}")
+        except Exception as e:
+            print(f"Failed to play song: {e}")
     
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):

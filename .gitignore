@@ -9,6 +9,7 @@ venv/
 config.py
 cognee/.env
 settings.json
+cookies.txt
 
 # Cognee data (large, generated)
 cognee_data/
@@ -23,6 +24,13 @@ tts/StyleTTS2/
 
 # Reference voice audio files (large binaries)
 tts/reference_voices/*.wav
+
+# Music downloads (large binaries)
+music/requests/*.mp3
+music/requests/*.mp4
+music/requests/*.webm
+music/requests/*.mkv
+music/requests/karaoke/*.wav
 
 # OS
 .DS_Store

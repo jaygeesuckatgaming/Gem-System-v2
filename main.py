@@ -12,7 +12,7 @@ from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
-from clients import LLMClient, SSNClient, CogneeClient, TTSClient
+from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient
 from clients.audio_player import AudioPlayer
 
 app = Quart(__name__)
@@ -23,6 +23,7 @@ llm = LLMClient(model=config.OLLAMA_MODEL, base_url=config.OLLAMA_BASE_URL)
 ssn = SSNClient(api_url=config.SSN_API_URL, session_id=config.SSN_SESSION_ID)
 cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
 tts = TTSClient(tts_url=config.TTS_URL)
+music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 
 # Audio player (plays TTS output when not using Neurosync)
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
@@ -102,6 +103,39 @@ def save_persisted_settings():
 load_persisted_settings()
 
 
+def extract_song_command(text: str):
+    """Extract song name from a song request command.
+    Returns the song name, or None if not a song command.
+    """
+    text_lower = text.lower().strip()
+    
+    # Remove wake word prefix first
+    for word in config.WAKE_WORDS:
+        if text_lower.startswith(word.lower()):
+            text_lower = text_lower[len(word):].strip()
+            break
+    
+    # Song command patterns
+    patterns = [
+        "play the song ",
+        "sing the song ",
+        "download song ",
+        "download the song ",
+        "get song ",
+        "can you play ",
+        "play ",
+        "sing ",
+    ]
+    
+    for pattern in patterns:
+        if text_lower.startswith(pattern):
+            song_name = text_lower[len(pattern):].strip()
+            if song_name:
+                return song_name
+    
+    return None
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # Extract message data
@@ -131,6 +165,14 @@ async def handle_incoming_message(data: dict):
     
     if not wake_word:
         return  # No wake word, ignore
+    
+    # Check for song command (intercept before LLM)
+    song_name = extract_song_command(message)
+    if song_name:
+        print(f"🎵 Song command detected: '{song_name}'")
+        music.download_song(song_name)
+        await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
+        return
     
     # Store user message in memory
     await cognee.remember(speaker, message)
@@ -348,6 +390,65 @@ async def api_tts():
     return jsonify({'status': 'ok' if success else 'error'})
 
 
+@app.route('/api/music/songs', methods=['GET'])
+async def api_music_songs():
+    """List available karaoke songs"""
+    songs = music.list_songs()
+    return jsonify({'status': 'ok', 'songs': songs})
+
+
+@app.route('/api/music/queue', methods=['GET'])
+async def api_music_queue():
+    """Get current song queue"""
+    return jsonify({'status': 'ok', 'queue': music.get_queue()})
+
+
+@app.route('/api/music/queue', methods=['POST'])
+async def api_music_add_queue():
+    """Add song to queue"""
+    data = await request.get_json()
+    song_name = data.get('song', '')
+    if not song_name:
+        return jsonify({'status': 'error', 'error': 'No song specified'}), 400
+    music.add_to_queue(song_name)
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/music/queue', methods=['DELETE'])
+async def api_music_clear_queue():
+    """Clear song queue"""
+    music.clear_queue()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/music/download', methods=['POST'])
+async def api_music_download():
+    """Download a song"""
+    data = await request.get_json()
+    query = data.get('query', '')
+    if not query:
+        return jsonify({'status': 'error', 'error': 'No query specified'}), 400
+    success = music.download_song(query)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
+@app.route('/api/music/status', methods=['GET'])
+async def api_music_status():
+    """Get music download status"""
+    return jsonify({'status': 'ok', **music.get_download_status()})
+
+
+@app.route('/api/music/play', methods=['POST'])
+async def api_music_play():
+    """Play a karaoke song"""
+    data = await request.get_json()
+    song_name = data.get('song', '')
+    if not song_name:
+        return jsonify({'status': 'error', 'error': 'No song specified'}), 400
+    success = music.play_song(song_name)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
 @app.route('/chat', methods=['POST'])
 async def chat():
     """HTTP chat endpoint (alternative to WebSocket)"""
@@ -375,6 +476,9 @@ async def startup():
     
     # Check Cognee connection
     await cognee.check_connection()
+    
+    # Check music system
+    music.check_connection()
     
     # Check TTS connection (if enabled)
     if config.TTS_ENABLED:

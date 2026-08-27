@@ -6,3 +6,4 @@ websockets
 customtkinter
 sounddevice
 pygame
+ytmusicapi
