@@ -144,6 +144,13 @@ class ControlPanel(ctk.CTk):
         self.wake_entry = ctk.CTkEntry(self.llm_tab)
         self.wake_entry.pack(fill="x", padx=20, pady=10)
         
+        # Voice speaker name
+        speaker_label = ctk.CTkLabel(self.llm_tab, text="Voice Speaker Name (for memory):", font=ctk.CTkFont(size=14))
+        speaker_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.speaker_entry = ctk.CTkEntry(self.llm_tab)
+        self.speaker_entry.pack(fill="x", padx=20, pady=10)
+        
         # Save button
         save_btn = ctk.CTkButton(self.llm_tab, text="Save LLM Settings", command=self.save_llm_settings)
         save_btn.pack(pady=20)
@@ -1399,6 +1406,9 @@ class ControlPanel(ctk.CTk):
                 
                 self.model_entry.delete(0, "end")
                 self.model_entry.insert(0, data['ollama_model'])
+                
+                self.speaker_entry.delete(0, "end")
+                self.speaker_entry.insert(0, data.get('voice_speaker_name', 'JayGee'))
         except Exception as e:
             print(f"Failed to load settings: {e}")
     
@@ -1410,7 +1420,8 @@ class ControlPanel(ctk.CTk):
             payload = {
                 'system_prompt': self.prompt_textbox.get("1.0", "end").strip(),
                 'wake_words': wake_words,
-                'ollama_model': self.model_entry.get().strip()
+                'ollama_model': self.model_entry.get().strip(),
+                'voice_speaker_name': self.speaker_entry.get().strip()
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)

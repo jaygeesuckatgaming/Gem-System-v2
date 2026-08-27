@@ -51,6 +51,9 @@ OSC_ADDRESS = "/chat/message"
 # Twitch Music Check (verify songs against Twitch DJ Program)
 TWITCH_MUSIC_CHECK_ENABLED = True
 
+# Voice input speaker name (used for memory storage of microphone input)
+VOICE_SPEAKER_NAME = "JayGee"
+
 # Server
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5000

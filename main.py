@@ -409,7 +409,8 @@ async def api_get_settings():
         'system_prompt': config.SYSTEM_PROMPT,
         'wake_words': config.WAKE_WORDS,
         'ollama_model': config.OLLAMA_MODEL,
-        'ssn_session_id': config.SSN_SESSION_ID
+        'ssn_session_id': config.SSN_SESSION_ID,
+        'voice_speaker_name': config.VOICE_SPEAKER_NAME
     })
 
 
@@ -428,6 +429,8 @@ async def api_update_settings():
     if 'ssn_session_id' in data:
         config.SSN_SESSION_ID = data['ssn_session_id']
         ssn.session_id = data['ssn_session_id']
+    if 'voice_speaker_name' in data:
+        config.VOICE_SPEAKER_NAME = data['voice_speaker_name']
     if 'ssn_targets' in data:
         config.SSN_TARGETS = data['ssn_targets']
     if 'tts_enabled' in data:
@@ -688,7 +691,7 @@ async def process():
     song_name = extract_song_command(text)
     if song_name:
         print(f"🎵 Song command detected: '{song_name}'")
-        await cognee.remember("User", text)
+        await cognee.remember(config.VOICE_SPEAKER_NAME, text)
         if config.TWITCH_MUSIC_CHECK_ENABLED:
             result = music.verify_song(song_name)
             if result.get('status') == 'restricted':
@@ -707,10 +710,10 @@ async def process():
         return jsonify({'status': 'ok'})
     
     # Store in memory
-    await cognee.remember("User", text)
+    await cognee.remember(config.VOICE_SPEAKER_NAME, text)
     
     # Recall memory context
-    memory_context = await get_memory_context("User", text)
+    memory_context = await get_memory_context(config.VOICE_SPEAKER_NAME, text)
     
     # Get response from LLM
     system_prompt = config.SYSTEM_PROMPT
