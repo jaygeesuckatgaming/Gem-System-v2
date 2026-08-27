@@ -40,6 +40,7 @@ class ControlPanel(ctk.CTk):
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
         
         # Add tabs
+        self.status_tab = self.tabview.add("Status")
         self.llm_tab = self.tabview.add("LLM")
         self.memory_tab = self.tabview.add("Memory")
         self.tts_tab = self.tabview.add("TTS")
@@ -48,6 +49,7 @@ class ControlPanel(ctk.CTk):
         self.neurosync_tab = self.tabview.add("Neurosync")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
+        self.build_status_tab()
         self.build_llm_tab()
         self.build_memory_tab()
         self.build_tts_tab()
@@ -60,6 +62,39 @@ class ControlPanel(ctk.CTk):
         self.polling = True
         self.poll_thread = threading.Thread(target=self.poll_status, daemon=True)
         self.poll_thread.start()
+    
+    # ==================== STATUS TAB ====================
+    def build_status_tab(self):
+        """Build the Status tab with all connection indicators"""
+        title = ctk.CTkLabel(self.status_tab, text="System Status", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+        
+        status_frame = ctk.CTkFrame(self.status_tab)
+        status_frame.pack(fill="x", padx=20, pady=10)
+        
+        # LLM status
+        self.status_llm = ctk.CTkLabel(status_frame, text="LLM: Checking...", font=ctk.CTkFont(size=16))
+        self.status_llm.pack(anchor="w", padx=20, pady=10)
+        
+        # SSN status
+        self.status_ssn = ctk.CTkLabel(status_frame, text="SSN: Checking...", font=ctk.CTkFont(size=16))
+        self.status_ssn.pack(anchor="w", padx=20, pady=10)
+        
+        # Cognee status
+        self.status_cognee = ctk.CTkLabel(status_frame, text="Cognee: Checking...", font=ctk.CTkFont(size=16))
+        self.status_cognee.pack(anchor="w", padx=20, pady=10)
+        
+        # TTS status
+        self.status_tts = ctk.CTkLabel(status_frame, text="TTS: Checking...", font=ctk.CTkFont(size=16))
+        self.status_tts.pack(anchor="w", padx=20, pady=10)
+        
+        # Music status
+        self.status_music = ctk.CTkLabel(status_frame, text="Music: Checking...", font=ctk.CTkFont(size=16))
+        self.status_music.pack(anchor="w", padx=20, pady=10)
+        
+        # Refresh button
+        refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
+        refresh_btn.pack(pady=20)
     
     # ==================== LLM TAB ====================
     def build_llm_tab(self):
@@ -1085,31 +1120,47 @@ class ControlPanel(ctk.CTk):
                 # LLM status
                 if data['llm']['enabled']:
                     self.llm_status.configure(text=f"Status: ✓ Connected ({data['llm']['model']})", text_color="green")
+                    self.status_llm.configure(text=f"LLM: ✓ Connected ({data['llm']['model']})", text_color="green")
                 else:
                     self.llm_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_llm.configure(text="LLM: ✗ Disconnected", text_color="red")
                 
                 # Memory status
                 if data['cognee']['enabled']:
                     self.memory_status.configure(text="Status: ✓ Connected", text_color="green")
+                    self.status_cognee.configure(text="Cognee: ✓ Connected", text_color="green")
                 else:
                     self.memory_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_cognee.configure(text="Cognee: ✗ Disconnected", text_color="red")
                 
                 # SSN status
                 if data['ssn']['enabled']:
                     self.ssn_status.configure(text="Status: ✓ Connected", text_color="green")
+                    self.status_ssn.configure(text="SSN: ✓ Connected", text_color="green")
                 else:
                     self.ssn_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_ssn.configure(text="SSN: ✗ Disconnected", text_color="red")
                 
                 # TTS status
                 if data.get('tts', {}).get('enabled'):
                     self.tts_status.configure(text="Status: ✓ Connected", text_color="green")
+                    self.status_tts.configure(text="TTS: ✓ Connected", text_color="green")
                 else:
                     self.tts_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_tts.configure(text="TTS: ✗ Disconnected", text_color="red")
+                
+                # Music status
+                self.status_music.configure(text="Music: ✓ Ready", text_color="green")
         except Exception as e:
             self.llm_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.memory_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.ssn_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.tts_status.configure(text="Status: ✗ Server unreachable", text_color="red")
+            self.status_llm.configure(text="LLM: ✗ Server unreachable", text_color="red")
+            self.status_ssn.configure(text="SSN: ✗ Server unreachable", text_color="red")
+            self.status_cognee.configure(text="Cognee: ✗ Server unreachable", text_color="red")
+            self.status_tts.configure(text="TTS: ✗ Server unreachable", text_color="red")
+            self.status_music.configure(text="Music: ✗ Server unreachable", text_color="red")
     
     # ==================== LLM SETTINGS ====================
     def load_llm_settings(self):

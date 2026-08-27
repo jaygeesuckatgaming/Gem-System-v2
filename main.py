@@ -171,6 +171,9 @@ async def handle_incoming_message(data: dict):
     if song_name:
         print(f"🎵 Song command detected: '{song_name}'")
         
+        # Store the song request in memory
+        await cognee.remember(speaker, message)
+        
         # Check Twitch DJ Program restrictions
         if config.TWITCH_MUSIC_CHECK_ENABLED:
             result = music.verify_song(song_name)
