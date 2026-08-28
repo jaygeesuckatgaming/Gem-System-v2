@@ -167,6 +167,35 @@ def extract_song_command(text: str):
     return None
 
 
+def extract_sing_command(text: str):
+    """Extract song name from a 'sing the song' command (karaoke library).
+    Returns the song name, or None if not a sing command.
+    """
+    text_lower = text.lower().strip()
+    
+    # Remove wake word prefix first
+    for word in config.WAKE_WORDS:
+        if text_lower.startswith(word.lower()):
+            text_lower = text_lower[len(word):].strip()
+            break
+    
+    # Sing command patterns (karaoke library, not download)
+    patterns = [
+        "can you sing the song ",
+        "can you sing ",
+        "sing the song ",
+        "sing ",
+    ]
+    
+    for pattern in patterns:
+        if text_lower.startswith(pattern):
+            song_name = text_lower[len(pattern):].strip()
+            if song_name:
+                return song_name
+    
+    return None
+
+
 def extract_opencode_command(text: str):
     """Extract OpenCode command from a message.
     Returns the command, or None if not an OpenCode command.
@@ -246,6 +275,23 @@ async def handle_incoming_message(data: dict):
     
     if not wake_word:
         return  # No wake word, ignore
+    
+    # Check for "sing the song" command (karaoke library, before download)
+    sing_name = extract_sing_command(message)
+    if sing_name:
+        print(f"🎤 Sing command detected: '{sing_name}'")
+        await cognee.remember(speaker, message)
+        
+        # Try to find and play from the karaoke library
+        result = music.library.find_song(sing_name)
+        if result:
+            music.play_song(sing_name)
+            await ssn.send_message(f"🎤 Singing '{sing_name}'!", targets=config.SSN_TARGETS)
+        else:
+            # Not in library, fall back to download
+            await ssn.send_message(f"🎤 I don't have '{sing_name}' in my library, downloading it instead...", targets=config.SSN_TARGETS)
+            music.download_song(sing_name)
+        return
     
     # Check for song command (intercept before LLM)
     song_name = extract_song_command(message)

@@ -271,7 +271,10 @@ class MusicClient:
         """Pause the background song (if playing)"""
         try:
             import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy() and self.background_song_path:
+            mixer_init = pygame.mixer.get_init()
+            music_busy = pygame.mixer.music.get_busy() if mixer_init else False
+            print(f"DEBUG pause: mixer_init={mixer_init}, music_busy={music_busy}, bg_path={self.background_song_path}")
+            if mixer_init and music_busy:
                 pygame.mixer.music.pause()
                 self.background_song_paused = True
                 print("🎵 Background music paused")
@@ -284,7 +287,7 @@ class MusicClient:
         """Resume the background song (if it was paused)"""
         try:
             import pygame
-            if self.background_song_paused and self.background_song_path:
+            if self.background_song_paused:
                 pygame.mixer.music.unpause()
                 self.background_song_paused = False
                 print("🎵 Background music resumed")
@@ -334,6 +337,9 @@ class MusicClient:
         print(f"  Vocals: {file1}")
         print(f"  Instrumental: {file2}")
 
+        # Pause background music while the karaoke song plays
+        self.pause_background_song()
+
         # Launch dual audio player in background
         thread = threading.Thread(target=self._launch_player, args=(file1, file2), daemon=True)
         thread.start()
@@ -348,6 +354,9 @@ class MusicClient:
             player.run()
         except Exception as e:
             print(f"✗ Player error: {e}")
+        finally:
+            # Resume background music after the karaoke song finishes
+            self.resume_background_song()
 
 
 if __name__ == "__main__":

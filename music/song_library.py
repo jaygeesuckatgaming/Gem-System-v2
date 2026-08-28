@@ -46,20 +46,23 @@ class SongLibrary:
                 stem = file.stem.lower()
                 if stem.endswith(pattern1):
                     base_name = stem[:-len(pattern1)]
-                    if base_name == song_name_normalized:
+                    base_name_normalized = base_name.replace(" ", "_").replace("-", "_")
+                    if base_name_normalized == song_name_normalized:
                         file1 = file
-                        file2_name_normalized = song_name_normalized + pattern2 + ".wav"
                         for f in all_wav_files:
-                            if f.name.lower() == file2_name_normalized:
-                                return (str(file1), str(f))
+                            f_stem = f.stem.lower()
+                            if f_stem.endswith(pattern2):
+                                f_base = f_stem[:-len(pattern2)].replace(" ", "_").replace("-", "_")
+                                if f_base == song_name_normalized:
+                                    return (str(file1), str(f))
         
         for file in all_wav_files:
-            stem = file.stem.lower()
+            stem = file.stem.lower().replace(" ", "_").replace("-", "_")
             if stem == song_name_normalized:
                 file1 = file
-                file2_name_normalized = song_name_normalized + "_2.wav"
                 for f in all_wav_files:
-                    if f.name.lower() == file2_name_normalized:
+                    f_stem = f.stem.lower().replace(" ", "_").replace("-", "_")
+                    if f_stem == song_name_normalized + "_2":
                         return (str(file1), str(f))
         
         return None
