@@ -199,6 +199,24 @@ def is_vision_command(text: str) -> bool:
     return False
 
 
+def translate_emotes(text: str) -> str:
+    """Translate chat emotes into their meanings so the LLM understands them.
+    Returns the original text with emote meanings appended in brackets.
+    """
+    if not text:
+        return text
+    
+    text_lower = text.lower()
+    found_emotes = []
+    for emote, meaning in config.EMOTE_MEANINGS.items():
+        if emote in text_lower:
+            found_emotes.append(f"{emote}={meaning}")
+    
+    if found_emotes:
+        return f"{text} [emotes: {', '.join(found_emotes)}]"
+    return text
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # Extract message data
@@ -303,6 +321,9 @@ async def handle_incoming_message(data: dict):
     # Store user message in memory
     await cognee.remember(speaker, message)
     
+    # Translate emotes so the LLM understands them
+    llm_message = translate_emotes(message)
+    
     # Recall memory context
     memory_context = await get_memory_context(speaker, message)
     
@@ -311,7 +332,7 @@ async def handle_incoming_message(data: dict):
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
     
-    response = await llm.chat(message, system_prompt=system_prompt)
+    response = await llm.chat(llm_message, system_prompt=system_prompt)
     print(f"[GEM] {response}")
     
     # Store AI response in memory
