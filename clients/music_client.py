@@ -346,12 +346,10 @@ class MusicClient:
         return True
 
     def _launch_player(self, file1: str, file2: str):
-        """Launch dual audio player"""
+        """Launch headless dual audio player (no Tkinter)"""
         try:
-            from dual_audio_player import DualAudioPlayer
-            player = DualAudioPlayer()
-            player.load_files(file1, file2)
-            player.run()
+            from headless_dual_audio import play_dual
+            play_dual(file1, file2)
         except Exception as e:
             print(f"✗ Player error: {e}")
         finally:
