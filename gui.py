@@ -37,6 +37,10 @@ class ControlPanel(ctk.CTk):
         self.title("Gem-System v2 - Control Panel")
         self.geometry("1000x800")
         
+        # Track server reachability to avoid spamming errors on startup
+        self._server_reachable = False
+        self._settings_loaded = False
+        
         # Create tab view
         self.tabview = ctk.CTkTabview(self)
         self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
@@ -102,9 +106,22 @@ class ControlPanel(ctk.CTk):
         refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
         refresh_btn.pack(pady=20)
         
+        # Start MCP Server button
+        start_mcp_btn = ctk.CTkButton(self.status_tab, text="Start MCP Server", command=self.start_mcp_server)
+        start_mcp_btn.pack(pady=10)
+        
         # Start Listener button
         start_listen_btn = ctk.CTkButton(self.status_tab, text="Start Audio Listener", command=self.start_listener)
         start_listen_btn.pack(pady=10)
+    
+    def start_mcp_server(self):
+        """Launch the MCP server (main.py)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_mcp.bat")
+        try:
+            subprocess.Popen([bat_path], shell=True)
+            print("✓ Started MCP Server")
+        except Exception as e:
+            print(f"Failed to start MCP server: {e}")
     
     def start_listener(self):
         """Launch the audio listener (listen.py)"""
@@ -156,9 +173,6 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(self.llm_tab, text="Save LLM Settings", command=self.save_llm_settings)
         save_btn.pack(pady=20)
-        
-        # Load current settings
-        self.load_llm_settings()
     
     # ==================== MEMORY TAB ====================
     def build_memory_tab(self):
@@ -254,9 +268,6 @@ class ControlPanel(ctk.CTk):
         self.recall_results = ctk.CTkTextbox(scroll_frame, height=150)
         self.recall_results.pack(fill="x", pady=10)
         self.recall_results.configure(state="disabled")
-        
-        # Load current settings
-        self.load_cognee_settings()
     
     # ==================== TTS TAB ====================
     def build_tts_tab(self):
@@ -267,6 +278,10 @@ class ControlPanel(ctk.CTk):
         # Connection status
         self.tts_status = ctk.CTkLabel(self.tts_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
         self.tts_status.pack(anchor="w", padx=20, pady=5)
+        
+        # Start StyleTTS2 button
+        start_styletts_btn = ctk.CTkButton(self.tts_tab, text="Start StyleTTS2 Server", command=self.start_styletts2)
+        start_styletts_btn.pack(anchor="w", padx=20, pady=10)
         
         # Enable toggle
         self.tts_enabled_var = ctk.BooleanVar(value=False)
@@ -347,9 +362,6 @@ class ControlPanel(ctk.CTk):
         
         test_btn = ctk.CTkButton(test_frame, text="Speak", width=100, command=self.test_tts)
         test_btn.pack(side="right", padx=10, pady=10)
-        
-        # Load current settings
-        self.load_tts_settings()
     
     def update_diffusion_label(self, value):
         self.diffusion_value_label.configure(text=str(int(value)))
@@ -478,10 +490,6 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(scroll_frame, text="Save Audio Settings", command=self.save_audio_settings)
         save_btn.pack(pady=20)
-        
-        # Load current settings
-        self.load_audio_settings()
-        self.refresh_audio_devices()
         
         # Start VU meter update loop
         self.after(50, self.update_vu_meter)
@@ -931,11 +939,6 @@ class ControlPanel(ctk.CTk):
         
         self.bg_status_label = ctk.CTkLabel(scroll_frame, text="Background: None", font=ctk.CTkFont(size=13))
         self.bg_status_label.pack(anchor="w", pady=5)
-        
-        # Load initial data
-        self.refresh_music_library()
-        self.refresh_music_queue()
-        self.refresh_background_songs()
     
     def download_song(self):
         """Download a song from the entry field"""
@@ -1199,9 +1202,6 @@ class ControlPanel(ctk.CTk):
         
         self.emote_status_label = ctk.CTkLabel(scroll_frame, text="", font=ctk.CTkFont(size=12))
         self.emote_status_label.pack(anchor="w", pady=10)
-        
-        # Load current settings
-        self.load_neurosync_settings()
     
     def update_mouth_label(self, value):
         self.mouth_scale_value.configure(text=f"{value:.2f}")
@@ -1344,9 +1344,6 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(self.osc_tab, text="Save Actions", command=self.save_osc_actions)
         save_btn.pack(pady=10)
-        
-        # Load existing actions
-        self.load_osc_actions()
     
     def add_osc_action_row(self, phrase="", address="", value=""):
         """Add a new OSC action row"""
@@ -1439,9 +1436,6 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(self.opencode_tab, text="Save OpenCode Settings", command=self.save_opencode_settings)
         save_btn.pack(pady=20)
-        
-        # Load current settings
-        self.load_opencode_settings()
     
     def load_opencode_settings(self):
         """Load OpenCode settings from server"""
@@ -1523,9 +1517,6 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(self.ssn_tab, text="Save SSN Settings", command=self.save_ssn_settings)
         save_btn.pack(pady=20)
-        
-        # Load current settings
-        self.load_ssn_settings()
     
     # ==================== STATUS POLLING ====================
     def poll_status(self):
@@ -1540,6 +1531,12 @@ class ControlPanel(ctk.CTk):
             response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
             if response.status_code == 200:
                 data = response.json()
+                
+                # Server just became reachable - load settings once
+                if not self._server_reachable:
+                    self._server_reachable = True
+                    print("✓ MCP server connected, loading settings...")
+                    self.load_all_settings()
                 
                 # LLM status
                 if data['llm']['enabled']:
@@ -1582,6 +1579,7 @@ class ControlPanel(ctk.CTk):
                 else:
                     self.opencode_status.configure(text="Status: ✗ Disconnected", text_color="red")
         except Exception as e:
+            self._server_reachable = False
             self.llm_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.memory_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.ssn_status.configure(text="Status: ✗ Server unreachable", text_color="red")
@@ -1591,6 +1589,22 @@ class ControlPanel(ctk.CTk):
             self.status_cognee.configure(text="Cognee: ✗ Server unreachable", text_color="red")
             self.status_tts.configure(text="TTS: ✗ Server unreachable", text_color="red")
             self.status_music.configure(text="Music: ✗ Server unreachable", text_color="red")
+    
+    def load_all_settings(self):
+        """Load all settings from server (called once when server becomes reachable)"""
+        self.load_llm_settings()
+        self.load_cognee_settings()
+        self.load_tts_settings()
+        self.load_audio_settings()
+        self.load_ssn_settings()
+        self.load_neurosync_settings()
+        self.load_opencode_settings()
+        self.load_osc_actions()
+        self.refresh_music_library()
+        self.refresh_music_queue()
+        self.refresh_background_songs()
+        self.refresh_audio_devices()
+        self.refresh_input_devices()
     
     # ==================== LLM SETTINGS ====================
     def load_llm_settings(self):
@@ -1755,6 +1769,15 @@ class ControlPanel(ctk.CTk):
             print(f"Failed to save SSN settings: {e}")
     
     # ==================== TTS SETTINGS ====================
+    def start_styletts2(self):
+        """Launch the StyleTTS2 server"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_styletts2.bat")
+        try:
+            subprocess.Popen([bat_path], shell=True)
+            print("✓ Started StyleTTS2 Server")
+        except Exception as e:
+            print(f"Failed to start StyleTTS2: {e}")
+    
     def load_tts_settings(self):
         """Load current TTS settings from server"""
         try:
