@@ -4,6 +4,7 @@ Main app communicates with Cognee server on port 8011
 """
 
 import httpx
+import asyncio
 from typing import List, Optional
 
 
@@ -27,31 +28,35 @@ class CogneeClient:
         return False
 
     async def remember(self, speaker: str, text: str, source: str = "chat", session_id: Optional[str] = None):
-        """Add message to Cognee memory"""
+        """Add message to Cognee memory (fire-and-forget, non-blocking)"""
         if not self.enabled:
             return
 
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                payload = {
-                    "speaker": speaker,
-                    "text": text,
-                    "source": source,
-                    "session_id": session_id
-                }
-                response = await client.post(f"{self.server_url}/remember", json=payload)
-                if response.status_code == 200:
-                    print(f"✓ Cognee remembered: {speaker}: {text[:50]}")
-        except Exception as e:
-            print(f"✗ Cognee remember failed: {e}")
+        async def _do_remember():
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    payload = {
+                        "speaker": speaker,
+                        "text": text,
+                        "source": source,
+                        "session_id": session_id
+                    }
+                    response = await client.post(f"{self.server_url}/remember", json=payload)
+                    if response.status_code == 200:
+                        print(f"✓ Cognee remembered: {speaker}: {text[:50]}")
+            except Exception as e:
+                print(f"✗ Cognee remember failed: {e}")
+
+        # Run in background so it doesn't block the chat
+        asyncio.create_task(_do_remember())
 
     async def recall(self, query: str, session_id: Optional[str] = None, top_k: int = 10) -> List[str]:
-        """Query Cognee memory"""
+        """Query Cognee memory (with short timeout to avoid blocking chat)"""
         if not self.enabled:
             return []
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 payload = {
                     "query": query,
                     "session_id": session_id,

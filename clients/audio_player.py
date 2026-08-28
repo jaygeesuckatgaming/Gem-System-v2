@@ -22,6 +22,9 @@ class AudioPlayer:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._initialized = False
+        # Ducking callbacks (set by main.py to coordinate with music client)
+        self.duck_callback = None
+        self.unduck_callback = None
 
     def _resolve_device_name(self) -> Optional[str]:
         """Resolve the stored device string to an SDL-compatible device name.
@@ -132,20 +135,33 @@ class AudioPlayer:
                     time.sleep(0.1)
 
                 print("AudioPlayer: Playing audio...")
+                # Signal ducking start
+                if self.duck_callback:
+                    try:
+                        self.duck_callback()
+                    except Exception as e:
+                        print(f"AudioPlayer: duck callback error: {e}")
                 try:
-                    pygame.mixer.music.load(self.watch_path)
-                    pygame.mixer.music.play()
-                    while pygame.mixer.music.get_busy() and not self._stop_event.is_set():
+                    # Play TTS on a dedicated channel (WAV), leaving mixer.music
+                    # free for background music so ducking can lower it.
+                    tts_sound = pygame.mixer.Sound(self.watch_path)
+                    tts_channel = tts_sound.play()
+                    while tts_channel.get_busy() and not self._stop_event.is_set():
                         time.sleep(0.1)
                 except Exception as e:
                     print(f"AudioPlayer: Playback error: {e}")
                 finally:
                     try:
-                        pygame.mixer.music.stop()
-                        pygame.mixer.music.unload()
+                        pygame.mixer.stop()
                     except Exception:
                         pass
                     self._delete_file(self.watch_path)
+                    # Signal ducking release
+                    if self.unduck_callback:
+                        try:
+                            self.unduck_callback()
+                        except Exception as e:
+                            print(f"AudioPlayer: unduck callback error: {e}")
 
             time.sleep(0.5)
 

@@ -6,6 +6,7 @@ into the main Gem-System server.
 
 import os
 import sys
+import time
 import threading
 import subprocess
 from pathlib import Path
@@ -49,6 +50,8 @@ class MusicClient:
         self.background_song_path: Optional[str] = None
         self.background_song_paused = False
         self.background_resume_time = 0.0
+        self.bg_channel = None
+        self.bg_sound = None
 
     def check_connection(self) -> bool:
         """Check if music system is ready"""
@@ -131,6 +134,9 @@ class MusicClient:
         try:
             import pygame
 
+            # Pause background music while the request plays
+            self.pause_background_song()
+
             # Resolve device name (handle '[ID] Name' format)
             resolved_device = None
             if self.device_name:
@@ -172,8 +178,12 @@ class MusicClient:
                 import time
                 time.sleep(0.1)
             pygame.mixer.music.unload()
+
+            # Resume background music after the request finishes
+            self.resume_background_song()
         except Exception as e:
             print(f"✗ MP3 playback error: {e}")
+            self.resume_background_song()
 
     def play_mp3(self, filename: str) -> bool:
         """Play a downloaded MP3 by filename"""
@@ -210,15 +220,78 @@ class MusicClient:
         return True
 
     def _play_background_loop(self, filepath: str):
-        """Play background song in a loop"""
+        """Play background song in a loop using mixer.music (supports MP3)"""
         try:
             import pygame
-            pygame.mixer.init()
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
             pygame.mixer.music.load(filepath)
             pygame.mixer.music.play(loops=-1)
+            pygame.mixer.music.set_volume(1.0)
             print(f"🎵 Background music playing (looping)")
         except Exception as e:
             print(f"✗ Background playback error: {e}")
+
+    def duck_music(self, duck_amount: float = -15.0, attack_ms: int = 100, release_ms: int = 500):
+        """Lower background music volume (ducking) when TTS speaks"""
+        try:
+            import pygame
+            if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
+                return
+            target_volume = max(0.0, 10.0 ** (duck_amount / 20.0))
+            current_volume = pygame.mixer.music.get_volume()
+            steps = max(1, attack_ms // 20)
+            volume_step = (current_volume - target_volume) / steps
+            for i in range(steps):
+                new_vol = current_volume - (volume_step * (i + 1))
+                pygame.mixer.music.set_volume(max(0.0, new_vol))
+                time.sleep(0.02)
+            print(f"🎵 Music ducked to {target_volume:.2f} ({duck_amount}dB)")
+        except Exception as e:
+            print(f"✗ Duck music error: {e}")
+
+    def unduck_music(self, release_ms: int = 500):
+        """Restore background music volume after TTS finishes"""
+        try:
+            import pygame
+            if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
+                return
+            steps = max(1, release_ms // 20)
+            volume_step = (1.0 - pygame.mixer.music.get_volume()) / steps
+            for i in range(steps):
+                new_vol = pygame.mixer.music.get_volume() + volume_step
+                pygame.mixer.music.set_volume(min(1.0, new_vol))
+                time.sleep(0.02)
+            pygame.mixer.music.set_volume(1.0)
+            print("🎵 Music volume restored")
+        except Exception as e:
+            print(f"✗ Unduck music error: {e}")
+
+    def pause_background_song(self) -> bool:
+        """Pause the background song (if playing)"""
+        try:
+            import pygame
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy() and self.background_song_path:
+                pygame.mixer.music.pause()
+                self.background_song_paused = True
+                print("🎵 Background music paused")
+                return True
+        except Exception as e:
+            print(f"✗ Pause background error: {e}")
+        return False
+
+    def resume_background_song(self) -> bool:
+        """Resume the background song (if it was paused)"""
+        try:
+            import pygame
+            if self.background_song_paused and self.background_song_path:
+                pygame.mixer.music.unpause()
+                self.background_song_paused = False
+                print("🎵 Background music resumed")
+                return True
+        except Exception as e:
+            print(f"✗ Resume background error: {e}")
+        return False
 
     def stop_background_song(self) -> bool:
         """Stop the background song"""

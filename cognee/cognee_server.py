@@ -25,6 +25,7 @@ app = Quart(__name__)
 app = cors(app, allow_origin="*")
 
 initialized = False
+remember_lock = asyncio.Lock()
 
 
 async def initialize_cognee():
@@ -55,7 +56,7 @@ def serialize_results(results):
 
 @app.route('/remember', methods=['POST'])
 async def remember():
-    """Add message to memory"""
+    """Add message to memory (serialized to avoid overwhelming the graph)"""
     try:
         await initialize_cognee()
         data = await request.get_json()
@@ -67,10 +68,11 @@ async def remember():
 
         formatted = f"[{source}] {speaker}: {text}"
 
-        if session_id:
-            await cognee.remember(formatted, session_id=session_id)
-
-        await cognee.remember(formatted)
+        # Serialize remember operations so they don't pile up
+        async with remember_lock:
+            if session_id:
+                await cognee.remember(formatted, session_id=session_id)
+            await cognee.remember(formatted)
 
         return jsonify({"status": "ok", "message": "Remembered"})
     except Exception as e:

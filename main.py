@@ -32,6 +32,22 @@ vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISI
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
 audio_player = AudioPlayer(watch_path=_tts_output_path, device_name=config.AUDIO_OUTPUT_DEVICE or None)
 
+# Wire ducking callbacks (lower music volume when TTS speaks)
+def _duck_music():
+    if config.AUDIO_DUCKING_ENABLED:
+        music.duck_music(
+            duck_amount=config.AUDIO_DUCK_AMOUNT,
+            attack_ms=config.AUDIO_DUCK_ATTACK_MS,
+            release_ms=config.AUDIO_DUCK_RELEASE_MS
+        )
+
+def _unduck_music():
+    if config.AUDIO_DUCKING_ENABLED:
+        music.unduck_music(release_ms=config.AUDIO_DUCK_RELEASE_MS)
+
+audio_player.duck_callback = _duck_music
+audio_player.unduck_callback = _unduck_music
+
 # Track recent AI responses to prevent echo loops
 _last_ai_responses = deque(maxlen=10)
 
@@ -313,38 +329,43 @@ async def handle_incoming_message(data: dict):
 
 
 async def get_memory_context(speaker: str, message: str) -> str:
-    """Retrieve relevant memories for the current message"""
+    """Retrieve relevant memories for the current message (with overall timeout)"""
     import re
     
     memory_context = ""
     
-    # 1. Get user profile
-    user_results = await cognee.recall(f"[chat] {speaker}:", top_k=5)
-    if not user_results:
-        user_results = await cognee.recall(f"{speaker}:", top_k=5)
-    if not user_results:
-        user_results = await cognee.recall(f"{speaker}", top_k=5)
-    
-    if user_results:
-        memory_context += f"\n\nThings you remember about {speaker}:"
-        for result in user_results:
-            memory_context += f"\n- {result}"
-    
-    # 2. Search for entities mentioned in message
-    entities = re.findall(r'\b[A-Z][a-z]+\b', message)
-    entities = [e for e in entities if e.lower() not in config.STOP_WORDS]
-    
-    for entity in entities[:3]:
-        entity_results = await cognee.recall(f"[chat] {entity}:", top_k=3)
-        if not entity_results:
-            entity_results = await cognee.recall(f"{entity}:", top_k=3)
-        if not entity_results:
-            entity_results = await cognee.recall(f"{entity}", top_k=3)
-        
-        if entity_results:
-            memory_context += f"\n\nThings you remember about {entity}:"
-            for result in entity_results:
-                memory_context += f"\n- {result}"
+    try:
+        # Wrap the whole recall in a timeout so it can't block the chat
+        async with asyncio.timeout(3.0):
+            # 1. Get user profile
+            user_results = await cognee.recall(f"[chat] {speaker}:", top_k=5)
+            if not user_results:
+                user_results = await cognee.recall(f"{speaker}:", top_k=5)
+            if not user_results:
+                user_results = await cognee.recall(f"{speaker}", top_k=5)
+            
+            if user_results:
+                memory_context += f"\n\nThings you remember about {speaker}:"
+                for result in user_results:
+                    memory_context += f"\n- {result}"
+            
+            # 2. Search for entities mentioned in message
+            entities = re.findall(r'\b[A-Z][a-z]+\b', message)
+            entities = [e for e in entities if e.lower() not in config.STOP_WORDS]
+            
+            for entity in entities[:3]:
+                entity_results = await cognee.recall(f"[chat] {entity}:", top_k=3)
+                if not entity_results:
+                    entity_results = await cognee.recall(f"{entity}:", top_k=3)
+                if not entity_results:
+                    entity_results = await cognee.recall(f"{entity}", top_k=3)
+                
+                if entity_results:
+                    memory_context += f"\n\nThings you remember about {entity}:"
+                    for result in entity_results:
+                        memory_context += f"\n- {result}"
+    except (asyncio.TimeoutError, Exception):
+        print("⏱️ Memory recall timed out, proceeding without context")
     
     return memory_context
 
@@ -903,6 +924,8 @@ async def process():
 
 async def start_background_tasks():
     """Start SSN WebSocket listener in background"""
+    # Wire the message callback
+    ssn.on_message = handle_incoming_message
     # Start WebSocket listener
     asyncio.create_task(ssn.start_websocket_listener())
 

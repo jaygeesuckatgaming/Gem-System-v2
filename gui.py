@@ -108,6 +108,10 @@ class ControlPanel(ctk.CTk):
         refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
         refresh_btn.pack(pady=20)
         
+        # Start Cognee Server button
+        start_cognee_btn = ctk.CTkButton(self.status_tab, text="Start Cognee Server", command=self.start_cognee_server)
+        start_cognee_btn.pack(pady=10)
+        
         # Start MCP Server button
         start_mcp_btn = ctk.CTkButton(self.status_tab, text="Start MCP Server", command=self.start_mcp_server)
         start_mcp_btn.pack(pady=10)
@@ -128,6 +132,12 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to launch {bat_path}: {e}")
             return False
+    
+    def start_cognee_server(self):
+        """Launch the Cognee memory server"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_cognee.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started Cognee Server")
     
     def start_mcp_server(self):
         """Launch the MCP server (main.py)"""
@@ -939,6 +949,9 @@ class ControlPanel(ctk.CTk):
         
         self.bg_song_combo = ctk.CTkComboBox(bg_frame, values=["No background songs"], width=400)
         self.bg_song_combo.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+        
+        refresh_bg_btn = ctk.CTkButton(bg_frame, text="Refresh", width=70, command=self.refresh_background_songs)
+        refresh_bg_btn.pack(side="left", padx=(0, 5), pady=10)
         
         set_bg_btn = ctk.CTkButton(bg_frame, text="Set", width=60, command=self.set_background_song)
         set_bg_btn.pack(side="left", padx=(0, 5), pady=10)
