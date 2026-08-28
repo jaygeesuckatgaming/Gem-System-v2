@@ -59,6 +59,15 @@ OPENCODE_ENABLED = True
 OPENCODE_API_URL = "http://localhost:4096"
 OPENCODE_WORKSPACE = "C:/Users/jayge/Documents/AI/Gem-System-v2"
 
+# Vision Service
+VISION_ENABLED = True
+VISION_SCAN_URL = "http://127.0.0.1:5001/scan"
+VISION_GET_IMAGE_URL = "http://127.0.0.1:5001/get_image"
+VISION_TRIGGER_WORDS = ["see", "describe", "analyze", "scan", "what is in", "what's in"]
+VISION_IMAGE_SOURCE = "cam"
+VISION_CAMERA_INDEX = 0
+VISION_NDI_SOURCE_NAME = ""
+
 # Server
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5000

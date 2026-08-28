@@ -8,5 +8,6 @@ from .cognee_client import CogneeClient
 from .tts_client import TTSClient
 from .music_client import MusicClient
 from .opencode_client import OpenCodeClient
+from .vision_client import VisionClient
 
-__all__ = ['LLMClient', 'SSNClient', 'CogneeClient', 'TTSClient', 'MusicClient', 'OpenCodeClient']
+__all__ = ['LLMClient', 'SSNClient', 'CogneeClient', 'TTSClient', 'MusicClient', 'OpenCodeClient', 'VisionClient']

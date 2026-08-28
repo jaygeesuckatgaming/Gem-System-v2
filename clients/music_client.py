@@ -34,7 +34,7 @@ class MusicClient:
         self.download_folder = download_folder
 
         # Background songs folder
-        self.background_folder = os.path.join(PROJECT_ROOT, "background_songs")
+        self.background_folder = os.path.join(MUSIC_DIR, "background_songs")
 
         self.device_name = device_name
         self.queue: List[str] = []

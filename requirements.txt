@@ -8,3 +8,6 @@ sounddevice
 pygame
 ytmusicapi
 playwright
+opencv-python
+pillow
+ndi-python

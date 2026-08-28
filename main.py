@@ -12,7 +12,7 @@ from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
-from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient
+from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient
 from clients.audio_player import AudioPlayer
 from clients.opencode_client import format_opencode_response
 
@@ -26,6 +26,7 @@ cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
 tts = TTSClient(tts_url=config.TTS_URL)
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
+vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 
 # Audio player (plays TTS output when not using Neurosync)
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
@@ -75,6 +76,12 @@ def load_persisted_settings():
             config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
         if 'osc_actions' in data:
             config.OSC_ACTIONS = data['osc_actions']
+        if 'vision_image_source' in data:
+            config.VISION_IMAGE_SOURCE = data['vision_image_source']
+        if 'vision_camera_index' in data:
+            config.VISION_CAMERA_INDEX = data['vision_camera_index']
+        if 'vision_ndi_source_name' in data:
+            config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
     except Exception as e:
         print(f"Failed to load settings.json: {e}")
 
@@ -96,7 +103,10 @@ def save_persisted_settings():
             'audio_duck_amount': config.AUDIO_DUCK_AMOUNT,
             'audio_duck_attack_ms': config.AUDIO_DUCK_ATTACK_MS,
             'audio_duck_release_ms': config.AUDIO_DUCK_RELEASE_MS,
-            'osc_actions': config.OSC_ACTIONS
+            'osc_actions': config.OSC_ACTIONS,
+            'vision_image_source': config.VISION_IMAGE_SOURCE,
+            'vision_camera_index': config.VISION_CAMERA_INDEX,
+            'vision_ndi_source_name': config.VISION_NDI_SOURCE_NAME
         }
         with open(SETTINGS_FILE, "w") as f:
             json.dump(data, f, indent=2)
@@ -162,6 +172,15 @@ def extract_opencode_command(text: str):
                 return command
     
     return None
+
+
+def is_vision_command(text: str) -> bool:
+    """Check if a message is a vision command (contains trigger words)"""
+    text_lower = text.lower().strip()
+    for word in config.VISION_TRIGGER_WORDS:
+        if word.lower() in text_lower:
+            return True
+    return False
 
 
 async def handle_incoming_message(data: dict):
@@ -241,6 +260,28 @@ async def handle_incoming_message(data: dict):
             await cognee.remember("Gem", formatted)
         except Exception as e:
             await ssn.send_message(f"OpenCode error: {e}", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for vision command (intercept before LLM)
+    if config.VISION_ENABLED and is_vision_command(message):
+        print(f"👁️ Vision command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        
+        # Get scene description from vision service
+        vision_context = await vision.get_scene_description()
+        if vision_context:
+            # Include vision context in the LLM prompt
+            system_prompt = f"{config.SYSTEM_PROMPT}\n\nYou can see the current scene: {vision_context}"
+            response = await llm.chat(message, system_prompt=system_prompt)
+        else:
+            response = await llm.chat(message, system_prompt=config.SYSTEM_PROMPT)
+        
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        if config.TTS_ENABLED:
+            await tts.speak(response)
+        await ssn.send_message(response, targets=config.SSN_TARGETS)
         return
     
     # Store user message in memory
@@ -371,6 +412,14 @@ async def api_status():
             'enabled': config.OPENCODE_ENABLED,
             'api_url': config.OPENCODE_API_URL,
             'workspace': config.OPENCODE_WORKSPACE
+        },
+        'vision': {
+            'enabled': config.VISION_ENABLED,
+            'scan_url': config.VISION_SCAN_URL,
+            'get_image_url': config.VISION_GET_IMAGE_URL,
+            'image_source': config.VISION_IMAGE_SOURCE,
+            'camera_index': config.VISION_CAMERA_INDEX,
+            'ndi_source_name': config.VISION_NDI_SOURCE_NAME
         }
     })
 
@@ -531,11 +580,72 @@ async def api_update_settings():
     if 'opencode_workspace' in data:
         config.OPENCODE_WORKSPACE = data['opencode_workspace']
         opencode.workspace = data['opencode_workspace']
+    if 'vision_enabled' in data:
+        config.VISION_ENABLED = data['vision_enabled']
+    if 'vision_scan_url' in data:
+        config.VISION_SCAN_URL = data['vision_scan_url']
+        vision.scan_url = data['vision_scan_url']
+    if 'vision_get_image_url' in data:
+        config.VISION_GET_IMAGE_URL = data['vision_get_image_url']
+        vision.get_image_url = data['vision_get_image_url']
+    if 'vision_trigger_words' in data:
+        config.VISION_TRIGGER_WORDS = data['vision_trigger_words']
+    if 'vision_image_source' in data:
+        config.VISION_IMAGE_SOURCE = data['vision_image_source']
+    if 'vision_camera_index' in data:
+        config.VISION_CAMERA_INDEX = data['vision_camera_index']
+    if 'vision_ndi_source_name' in data:
+        config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
     
     # Persist TTS settings to file
     save_persisted_settings()
     
+    # Also write vision settings to mcp_settings.ini (read by vision.py)
+    if any(k in data for k in ('vision_image_source', 'vision_camera_index', 'vision_ndi_source_name')):
+        save_vision_ini_settings()
+    
     return jsonify({'status': 'ok'})
+
+
+def save_vision_ini_settings():
+    """Write vision settings to mcp_settings.ini (read by vision.py)"""
+    import configparser
+    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
+    try:
+        parser = configparser.ConfigParser()
+        parser.read(ini_path)
+        if not parser.has_section('VisionService'):
+            parser.add_section('VisionService')
+        parser.set('VisionService', 'image_source', config.VISION_IMAGE_SOURCE)
+        parser.set('VisionService', 'camera_index', str(config.VISION_CAMERA_INDEX))
+        parser.set('VisionService', 'ndi_source_name', config.VISION_NDI_SOURCE_NAME)
+        with open(ini_path, 'w') as f:
+            parser.write(f)
+        print("✓ Vision settings written to mcp_settings.ini")
+    except Exception as e:
+        print(f"Failed to write vision INI settings: {e}")
+
+
+@app.route('/api/vision/image', methods=['GET'])
+async def api_vision_image():
+    """Proxy the current camera image from the vision service"""
+    image_base64 = await vision.get_image_base64()
+    if image_base64:
+        return jsonify({'status': 'ok', 'image_base64': image_base64})
+    return jsonify({'status': 'error', 'error': 'Vision service not available'}), 503
+
+
+@app.route('/api/vision/cameras', methods=['GET'])
+async def api_vision_cameras():
+    """Scan for available cameras"""
+    import cv2
+    cameras = []
+    for index in range(10):
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            cameras.append(index)
+            cap.release()
+    return jsonify({'status': 'ok', 'cameras': cameras})
 
 
 @app.route('/api/osc/actions', methods=['GET'])
@@ -824,6 +934,10 @@ async def startup():
     # Check OpenCode connection (if enabled)
     if config.OPENCODE_ENABLED:
         await opencode.check_connection()
+    
+    # Check vision service (if enabled)
+    if config.VISION_ENABLED:
+        await vision.check_connection()
     
     # Start background tasks
     await start_background_tasks()

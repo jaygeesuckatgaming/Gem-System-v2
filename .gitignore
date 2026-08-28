@@ -31,7 +31,8 @@ music/requests/*.mp4
 music/requests/*.webm
 music/requests/*.mkv
 music/requests/karaoke/*.wav
-background_songs/*.mp3
+music/background_songs/*.mp3
+yt-dlp.exe
 
 # Neurosync (separate git repos)
 Neurosync/NeuroSync_Local_API/

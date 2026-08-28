@@ -35,7 +35,7 @@ class ControlPanel(ctk.CTk):
         super().__init__()
         
         self.title("Gem-System v2 - Control Panel")
-        self.geometry("1000x800")
+        self.geometry("1280x720")
         
         # Track server reachability to avoid spamming errors on startup
         self._server_reachable = False
@@ -55,6 +55,7 @@ class ControlPanel(ctk.CTk):
         self.neurosync_tab = self.tabview.add("Neurosync")
         self.osc_tab = self.tabview.add("OSC")
         self.opencode_tab = self.tabview.add("OpenCode")
+        self.vision_tab = self.tabview.add("Vision")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_status_tab()
@@ -66,6 +67,7 @@ class ControlPanel(ctk.CTk):
         self.build_neurosync_tab()
         self.build_osc_tab()
         self.build_opencode_tab()
+        self.build_vision_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -114,23 +116,30 @@ class ControlPanel(ctk.CTk):
         start_listen_btn = ctk.CTkButton(self.status_tab, text="Start Audio Listener", command=self.start_listener)
         start_listen_btn.pack(pady=10)
     
+    def _launch_detached(self, bat_path: str):
+        """Launch a batch file in its own detached console window"""
+        try:
+            subprocess.Popen(
+                f'start "" "{bat_path}"',
+                shell=True,
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            return True
+        except Exception as e:
+            print(f"Failed to launch {bat_path}: {e}")
+            return False
+    
     def start_mcp_server(self):
         """Launch the MCP server (main.py)"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_mcp.bat")
-        try:
-            subprocess.Popen([bat_path], shell=True)
+        if self._launch_detached(bat_path):
             print("✓ Started MCP Server")
-        except Exception as e:
-            print(f"Failed to start MCP server: {e}")
     
     def start_listener(self):
         """Launch the audio listener (listen.py)"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_listen.bat")
-        try:
-            subprocess.Popen([bat_path], shell=True)
+        if self._launch_detached(bat_path):
             print("✓ Started Audio Listener")
-        except Exception as e:
-            print(f"Failed to start listener: {e}")
     
     # ==================== LLM TAB ====================
     def build_llm_tab(self):
@@ -1305,20 +1314,14 @@ class ControlPanel(ctk.CTk):
     def start_neurosync_localapi(self):
         """Launch the Neurosync Local API batch file"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_localapi.bat")
-        try:
-            subprocess.Popen([bat_path], shell=True)
+        if self._launch_detached(bat_path):
             print("✓ Started Neurosync Local API")
-        except Exception as e:
-            print(f"Failed to start Local API: {e}")
     
     def start_neurosync_watcher(self):
         """Launch the Neurosync Watcher To Face batch file"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_watcher_to_face.bat")
-        try:
-            subprocess.Popen([bat_path], shell=True)
+        if self._launch_detached(bat_path):
             print("✓ Started Watcher To Face")
-        except Exception as e:
-            print(f"Failed to start Watcher To Face: {e}")
     
     # ==================== OSC TAB ====================
     def build_osc_tab(self):
@@ -1470,6 +1473,247 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to save OpenCode settings: {e}")
     
+    # ==================== VISION TAB ====================
+    def build_vision_tab(self):
+        """Build the Vision tab"""
+        self._preview_active = False
+        
+        title = ctk.CTkLabel(self.vision_tab, text="Vision", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+        
+        # Two-column layout: settings (left) + preview (right)
+        main_frame = ctk.CTkFrame(self.vision_tab, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # --- Left column: settings ---
+        left_frame = ctk.CTkFrame(main_frame)
+        left_frame.pack(side="left", fill="y", padx=(0, 10))
+        
+        # Connection status
+        self.vision_status = ctk.CTkLabel(left_frame, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.vision_status.pack(anchor="w", padx=20, pady=5)
+        
+        # Start Vision Service button
+        start_vision_btn = ctk.CTkButton(left_frame, text="Start Vision Service", command=self.start_vision_service)
+        start_vision_btn.pack(anchor="w", padx=20, pady=10)
+        
+        # Enable toggle
+        self.vision_enabled_var = ctk.BooleanVar(value=True)
+        enable_check = ctk.CTkCheckBox(left_frame, text="Enable Vision", variable=self.vision_enabled_var)
+        enable_check.pack(anchor="w", padx=20, pady=10)
+        
+        # Image source selector
+        source_label = ctk.CTkLabel(left_frame, text="Image Source:", font=ctk.CTkFont(size=14))
+        source_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.vision_source_combo = ctk.CTkComboBox(left_frame, values=["cam", "ndi"], width=200)
+        self.vision_source_combo.pack(anchor="w", padx=20, pady=10)
+        
+        # Camera index
+        camera_label = ctk.CTkLabel(left_frame, text="Camera Index:", font=ctk.CTkFont(size=14))
+        camera_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        camera_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        camera_frame.pack(fill="x", padx=20, pady=5)
+        
+        self.vision_camera_entry = ctk.CTkEntry(camera_frame, width=100)
+        self.vision_camera_entry.pack(side="left", padx=(0, 10))
+        
+        scan_cameras_btn = ctk.CTkButton(camera_frame, text="Scan Cameras", width=120, command=self.scan_cameras)
+        scan_cameras_btn.pack(side="left")
+        
+        self.camera_scan_result = ctk.CTkLabel(left_frame, text="", font=ctk.CTkFont(size=12))
+        self.camera_scan_result.pack(anchor="w", padx=20, pady=(0, 5))
+        
+        # NDI source name
+        ndi_label = ctk.CTkLabel(left_frame, text="NDI Source Name (optional):", font=ctk.CTkFont(size=14))
+        ndi_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.vision_ndi_entry = ctk.CTkEntry(left_frame)
+        self.vision_ndi_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Scan URL
+        scan_label = ctk.CTkLabel(left_frame, text="Scan URL:", font=ctk.CTkFont(size=14))
+        scan_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.vision_scan_entry = ctk.CTkEntry(left_frame)
+        self.vision_scan_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Get Image URL
+        image_label = ctk.CTkLabel(left_frame, text="Get Image URL:", font=ctk.CTkFont(size=14))
+        image_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.vision_image_entry = ctk.CTkEntry(left_frame)
+        self.vision_image_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Trigger words
+        trigger_label = ctk.CTkLabel(left_frame, text="Trigger Words (comma separated):", font=ctk.CTkFont(size=14))
+        trigger_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.vision_trigger_entry = ctk.CTkEntry(left_frame)
+        self.vision_trigger_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Save button
+        save_btn = ctk.CTkButton(left_frame, text="Save Vision Settings", command=self.save_vision_settings)
+        save_btn.pack(pady=20)
+        
+        # --- Right column: preview ---
+        right_frame = ctk.CTkFrame(main_frame)
+        right_frame.pack(side="left", fill="both", expand=True)
+        
+        preview_label = ctk.CTkLabel(right_frame, text="Camera Preview", font=ctk.CTkFont(size=16, weight="bold"))
+        preview_label.pack(anchor="w", padx=20, pady=(10, 5))
+        
+        preview_btn_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
+        preview_btn_frame.pack(fill="x", padx=20, pady=5)
+        
+        self.preview_toggle_btn = ctk.CTkButton(preview_btn_frame, text="Start Preview", width=120, command=self.toggle_vision_preview)
+        self.preview_toggle_btn.pack(side="left", padx=(0, 10))
+        
+        self.preview_status_label = ctk.CTkLabel(preview_btn_frame, text="Preview: Off", font=ctk.CTkFont(size=13))
+        self.preview_status_label.pack(side="left", padx=10)
+        
+        # Preview image display (16:9)
+        self.preview_image_label = ctk.CTkLabel(right_frame, text="No preview", width=640, height=360, fg_color="#1a1a1a")
+        self.preview_image_label.pack(padx=20, pady=10)
+        
+        # Load current settings
+        self.load_vision_settings()
+    
+    def toggle_vision_preview(self):
+        """Start/stop the camera preview"""
+        if getattr(self, '_preview_active', False):
+            self.stop_vision_preview()
+        else:
+            self.start_vision_preview()
+    
+    def start_vision_preview(self):
+        """Start fetching and displaying camera frames"""
+        self._preview_active = True
+        self.preview_toggle_btn.configure(text="Stop Preview")
+        self.preview_status_label.configure(text="Preview: On", text_color="green")
+        self._update_preview()
+    
+    def stop_vision_preview(self):
+        """Stop the camera preview"""
+        self._preview_active = False
+        self.preview_toggle_btn.configure(text="Start Preview")
+        self.preview_status_label.configure(text="Preview: Off", text_color="gray")
+    
+    def _update_preview(self):
+        """Fetch and display the current camera frame"""
+        if not getattr(self, '_preview_active', False):
+            return
+        
+        try:
+            import base64
+            from io import BytesIO
+            from PIL import Image, ImageTk
+            
+            response = httpx.get(f"{SERVER_URL}/api/vision/image", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                image_base64 = data.get('image_base64')
+                if image_base64:
+                    image_bytes = base64.b64decode(image_base64)
+                    pil_image = Image.open(BytesIO(image_bytes))
+                    pil_image = pil_image.resize((640, 360), Image.Resampling.LANCZOS)
+                    ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(640, 360))
+                    self.preview_image_label.configure(image=ctk_image, text="")
+                else:
+                    self.preview_image_label.configure(image=None, text="No image available")
+            else:
+                self.preview_image_label.configure(image=None, text="Vision service not running")
+        except Exception as e:
+            self.preview_image_label.configure(image=None, text="Vision service not running")
+        
+        # Schedule next update
+        self.after(500, self._update_preview)
+    
+    def start_vision_service(self):
+        """Launch the vision service (vision.py)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_vision.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started Vision Service")
+    
+    def scan_cameras(self):
+        """Scan for available cameras and display results"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/vision/cameras", timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                cameras = data.get('cameras', [])
+                if cameras:
+                    self.camera_scan_result.configure(
+                        text=f"Found cameras: {cameras}",
+                        text_color="green"
+                    )
+                    # Auto-fill first camera if entry is empty
+                    if not self.vision_camera_entry.get().strip():
+                        self.vision_camera_entry.insert(0, str(cameras[0]))
+                else:
+                    self.camera_scan_result.configure(
+                        text="No cameras found",
+                        text_color="red"
+                    )
+            else:
+                self.camera_scan_result.configure(
+                    text="MCP server not running",
+                    text_color="red"
+                )
+        except Exception as e:
+            self.camera_scan_result.configure(
+                text=f"Scan failed: {e}",
+                text_color="red"
+            )
+    
+    def load_vision_settings(self):
+        """Load vision settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                vision = data.get('vision', {})
+                
+                self.vision_enabled_var.set(vision.get('enabled', True))
+                
+                self.vision_source_combo.set(vision.get('image_source', 'cam'))
+                
+                self.vision_camera_entry.delete(0, "end")
+                self.vision_camera_entry.insert(0, str(vision.get('camera_index', 0)))
+                
+                self.vision_ndi_entry.delete(0, "end")
+                self.vision_ndi_entry.insert(0, vision.get('ndi_source_name', ''))
+                
+                self.vision_scan_entry.delete(0, "end")
+                self.vision_scan_entry.insert(0, vision.get('scan_url', ''))
+                
+                self.vision_image_entry.delete(0, "end")
+                self.vision_image_entry.insert(0, vision.get('get_image_url', ''))
+        except Exception as e:
+            print(f"Failed to load vision settings: {e}")
+    
+    def save_vision_settings(self):
+        """Save vision settings to server"""
+        try:
+            trigger_words = [w.strip() for w in self.vision_trigger_entry.get().split(",") if w.strip()]
+            
+            payload = {
+                'vision_enabled': self.vision_enabled_var.get(),
+                'vision_image_source': self.vision_source_combo.get(),
+                'vision_camera_index': int(self.vision_camera_entry.get().strip() or 0),
+                'vision_ndi_source_name': self.vision_ndi_entry.get().strip(),
+                'vision_scan_url': self.vision_scan_entry.get().strip(),
+                'vision_get_image_url': self.vision_image_entry.get().strip(),
+                'vision_trigger_words': trigger_words
+            }
+            
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Vision settings saved")
+        except Exception as e:
+            print(f"Failed to save vision settings: {e}")
+    
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):
         """Build the Social Stream Ninja tab"""
@@ -1578,6 +1822,12 @@ class ControlPanel(ctk.CTk):
                     self.opencode_status.configure(text="Status: ✓ Connected", text_color="green")
                 else:
                     self.opencode_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                
+                # Vision status
+                if data.get('vision', {}).get('enabled'):
+                    self.vision_status.configure(text="Status: ✓ Connected", text_color="green")
+                else:
+                    self.vision_status.configure(text="Status: ✗ Disconnected", text_color="red")
         except Exception as e:
             self._server_reachable = False
             self.llm_status.configure(text="Status: ✗ Server unreachable", text_color="red")
@@ -1599,6 +1849,7 @@ class ControlPanel(ctk.CTk):
         self.load_ssn_settings()
         self.load_neurosync_settings()
         self.load_opencode_settings()
+        self.load_vision_settings()
         self.load_osc_actions()
         self.refresh_music_library()
         self.refresh_music_queue()
@@ -1772,11 +2023,8 @@ class ControlPanel(ctk.CTk):
     def start_styletts2(self):
         """Launch the StyleTTS2 server"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_styletts2.bat")
-        try:
-            subprocess.Popen([bat_path], shell=True)
+        if self._launch_detached(bat_path):
             print("✓ Started StyleTTS2 Server")
-        except Exception as e:
-            print(f"Failed to start StyleTTS2: {e}")
     
     def load_tts_settings(self):
         """Load current TTS settings from server"""
@@ -1873,6 +2121,8 @@ class ControlPanel(ctk.CTk):
             self.stop_output_test()
         if getattr(self, '_is_monitoring_input', False):
             self.stop_input_monitor()
+        if getattr(self, '_preview_active', False):
+            self.stop_vision_preview()
         self.destroy()
 
 
