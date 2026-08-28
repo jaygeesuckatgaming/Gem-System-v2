@@ -7,5 +7,6 @@ from .ssn_client import SSNClient
 from .cognee_client import CogneeClient
 from .tts_client import TTSClient
 from .music_client import MusicClient
+from .opencode_client import OpenCodeClient
 
-__all__ = ['LLMClient', 'SSNClient', 'CogneeClient', 'TTSClient', 'MusicClient']
+__all__ = ['LLMClient', 'SSNClient', 'CogneeClient', 'TTSClient', 'MusicClient', 'OpenCodeClient']

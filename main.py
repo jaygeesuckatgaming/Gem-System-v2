@@ -12,8 +12,9 @@ from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
-from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient
+from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient
 from clients.audio_player import AudioPlayer
+from clients.opencode_client import format_opencode_response
 
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
@@ -24,6 +25,7 @@ ssn = SSNClient(api_url=config.SSN_API_URL, session_id=config.SSN_SESSION_ID)
 cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
 tts = TTSClient(tts_url=config.TTS_URL)
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
+opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 
 # Audio player (plays TTS output when not using Neurosync)
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
@@ -139,6 +141,29 @@ def extract_song_command(text: str):
     return None
 
 
+def extract_opencode_command(text: str):
+    """Extract OpenCode command from a message.
+    Returns the command, or None if not an OpenCode command.
+    """
+    text_lower = text.lower().strip()
+    
+    # Remove wake word prefix first
+    for word in config.WAKE_WORDS:
+        if text_lower.startswith(word.lower()):
+            text_lower = text_lower[len(word):].strip()
+            break
+    
+    # OpenCode trigger patterns
+    triggers = ["oc ", "use oc ", "try oc ", "ask oc ", "open code ", "opencode "]
+    for trigger in triggers:
+        if text_lower.startswith(trigger):
+            command = text_lower[len(trigger):].strip()
+            if command:
+                return command
+    
+    return None
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # Extract message data
@@ -202,6 +227,20 @@ async def handle_incoming_message(data: dict):
         value = osc_action.get('value', '')
         send_osc_message(address, value)
         await ssn.send_message(f"🎛️ Done! {osc_action.get('phrase')}", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for OpenCode command (intercept before LLM)
+    oc_command = extract_opencode_command(message)
+    if oc_command and config.OPENCODE_ENABLED:
+        print(f"💻 OpenCode command detected: '{oc_command}'")
+        await cognee.remember(speaker, message)
+        try:
+            oc_result = await opencode.execute_task(oc_command)
+            formatted = format_opencode_response(oc_result)
+            await ssn.send_message(formatted, targets=config.SSN_TARGETS)
+            await cognee.remember("Gem", formatted)
+        except Exception as e:
+            await ssn.send_message(f"OpenCode error: {e}", targets=config.SSN_TARGETS)
         return
     
     # Store user message in memory
@@ -327,6 +366,11 @@ async def api_status():
                 'port': config.OSC_PORT,
                 'address': config.OSC_ADDRESS
             }
+        },
+        'opencode': {
+            'enabled': config.OPENCODE_ENABLED,
+            'api_url': config.OPENCODE_API_URL,
+            'workspace': config.OPENCODE_WORKSPACE
         }
     })
 
@@ -479,6 +523,14 @@ async def api_update_settings():
         config.OSC_ADDRESS = data['osc_address']
     if 'osc_actions' in data:
         config.OSC_ACTIONS = data['osc_actions']
+    if 'opencode_enabled' in data:
+        config.OPENCODE_ENABLED = data['opencode_enabled']
+    if 'opencode_api_url' in data:
+        config.OPENCODE_API_URL = data['opencode_api_url']
+        opencode.api_url = data['opencode_api_url'].rstrip('/')
+    if 'opencode_workspace' in data:
+        config.OPENCODE_WORKSPACE = data['opencode_workspace']
+        opencode.workspace = data['opencode_workspace']
     
     # Persist TTS settings to file
     save_persisted_settings()
@@ -768,6 +820,10 @@ async def startup():
         # Start audio player (plays TTS output when not using Neurosync)
         if config.AUDIO_PLAYER_ENABLED:
             audio_player.start()
+    
+    # Check OpenCode connection (if enabled)
+    if config.OPENCODE_ENABLED:
+        await opencode.check_connection()
     
     # Start background tasks
     await start_background_tasks()

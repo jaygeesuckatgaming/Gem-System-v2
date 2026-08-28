@@ -50,6 +50,7 @@ class ControlPanel(ctk.CTk):
         self.music_tab = self.tabview.add("Music Requests")
         self.neurosync_tab = self.tabview.add("Neurosync")
         self.osc_tab = self.tabview.add("OSC")
+        self.opencode_tab = self.tabview.add("OpenCode")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         
         self.build_status_tab()
@@ -60,6 +61,7 @@ class ControlPanel(ctk.CTk):
         self.build_music_tab()
         self.build_neurosync_tab()
         self.build_osc_tab()
+        self.build_opencode_tab()
         self.build_ssn_tab()
         
         # Start status polling
@@ -1405,6 +1407,75 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to save OSC actions: {e}")
     
+    # ==================== OPENCODE TAB ====================
+    def build_opencode_tab(self):
+        """Build the OpenCode tab"""
+        title = ctk.CTkLabel(self.opencode_tab, text="OpenCode Integration", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+        
+        # Connection status
+        self.opencode_status = ctk.CTkLabel(self.opencode_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.opencode_status.pack(anchor="w", padx=20, pady=5)
+        
+        # Enable toggle
+        self.opencode_enabled_var = ctk.BooleanVar(value=True)
+        enable_check = ctk.CTkCheckBox(self.opencode_tab, text="Enable OpenCode", variable=self.opencode_enabled_var)
+        enable_check.pack(anchor="w", padx=20, pady=10)
+        
+        # API URL
+        url_label = ctk.CTkLabel(self.opencode_tab, text="API URL:", font=ctk.CTkFont(size=14))
+        url_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.opencode_url_entry = ctk.CTkEntry(self.opencode_tab)
+        self.opencode_url_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Workspace
+        workspace_label = ctk.CTkLabel(self.opencode_tab, text="Workspace:", font=ctk.CTkFont(size=14))
+        workspace_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.opencode_workspace_entry = ctk.CTkEntry(self.opencode_tab)
+        self.opencode_workspace_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Save button
+        save_btn = ctk.CTkButton(self.opencode_tab, text="Save OpenCode Settings", command=self.save_opencode_settings)
+        save_btn.pack(pady=20)
+        
+        # Load current settings
+        self.load_opencode_settings()
+    
+    def load_opencode_settings(self):
+        """Load OpenCode settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                oc = data.get('opencode', {})
+                
+                self.opencode_enabled_var.set(oc.get('enabled', True))
+                
+                self.opencode_url_entry.delete(0, "end")
+                self.opencode_url_entry.insert(0, oc.get('api_url', ''))
+                
+                self.opencode_workspace_entry.delete(0, "end")
+                self.opencode_workspace_entry.insert(0, oc.get('workspace', ''))
+        except Exception as e:
+            print(f"Failed to load OpenCode settings: {e}")
+    
+    def save_opencode_settings(self):
+        """Save OpenCode settings to server"""
+        try:
+            payload = {
+                'opencode_enabled': self.opencode_enabled_var.get(),
+                'opencode_api_url': self.opencode_url_entry.get().strip(),
+                'opencode_workspace': self.opencode_workspace_entry.get().strip()
+            }
+            
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ OpenCode settings saved")
+        except Exception as e:
+            print(f"Failed to save OpenCode settings: {e}")
+    
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):
         """Build the Social Stream Ninja tab"""
@@ -1504,6 +1575,12 @@ class ControlPanel(ctk.CTk):
                 
                 # Music status
                 self.status_music.configure(text="Music: ✓ Ready", text_color="green")
+                
+                # OpenCode status
+                if data.get('opencode', {}).get('enabled'):
+                    self.opencode_status.configure(text="Status: ✓ Connected", text_color="green")
+                else:
+                    self.opencode_status.configure(text="Status: ✗ Disconnected", text_color="red")
         except Exception as e:
             self.llm_status.configure(text="Status: ✗ Server unreachable", text_color="red")
             self.memory_status.configure(text="Status: ✗ Server unreachable", text_color="red")

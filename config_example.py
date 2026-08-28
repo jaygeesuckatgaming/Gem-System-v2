@@ -54,6 +54,11 @@ TWITCH_MUSIC_CHECK_ENABLED = True
 # Voice input speaker name (used for memory storage of microphone input)
 VOICE_SPEAKER_NAME = "JayGee"
 
+# OpenCode API
+OPENCODE_ENABLED = True
+OPENCODE_API_URL = "http://localhost:4096"
+OPENCODE_WORKSPACE = "C:/Users/jayge/Documents/AI/Gem-System-v2"
+
 # Server
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5000
