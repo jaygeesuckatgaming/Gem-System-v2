@@ -10,6 +10,7 @@ config.py
 cognee/.env
 settings.json
 cookies.txt
+known_speakers.json
 
 # Cognee data (large, generated)
 cognee_data/

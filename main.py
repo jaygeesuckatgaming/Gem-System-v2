@@ -51,6 +51,33 @@ audio_player.unduck_callback = _unduck_music
 # Track recent AI responses to prevent echo loops
 _last_ai_responses = deque(maxlen=10)
 
+# Track known speakers (for nickname resolution)
+_known_speakers = set()
+_KNOWN_SPEAKERS_FILE = os.path.join(os.path.dirname(__file__), "known_speakers.json")
+
+
+def load_known_speakers():
+    """Load known speakers from file"""
+    global _known_speakers
+    try:
+        if os.path.exists(_KNOWN_SPEAKERS_FILE):
+            with open(_KNOWN_SPEAKERS_FILE, "r") as f:
+                _known_speakers = set(json.load(f))
+    except Exception as e:
+        print(f"Failed to load known speakers: {e}")
+
+
+def save_known_speakers():
+    """Save known speakers to file"""
+    try:
+        with open(_KNOWN_SPEAKERS_FILE, "w") as f:
+            json.dump(list(_known_speakers), f)
+    except Exception as e:
+        print(f"Failed to save known speakers: {e}")
+
+
+load_known_speakers()
+
 # Settings persistence file
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
 
@@ -246,6 +273,26 @@ def translate_emotes(text: str) -> str:
     return text
 
 
+def resolve_speaker_name(name: str) -> str:
+    """Resolve a nickname/partial name to a full known speaker username.
+    E.g. 'Frank' -> '@frankturner9594' if that speaker is known.
+    """
+    name_lower = name.lower().lstrip('@')
+    
+    # Exact match first
+    for speaker in _known_speakers:
+        if speaker.lower().lstrip('@') == name_lower:
+            return speaker
+    
+    # Partial match (nickname is a prefix of the username)
+    for speaker in _known_speakers:
+        speaker_clean = speaker.lower().lstrip('@')
+        if speaker_clean.startswith(name_lower) and len(name_lower) >= 3:
+            return speaker
+    
+    return name
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # Extract message data
@@ -253,6 +300,11 @@ async def handle_incoming_message(data: dict):
     speaker = data.get('chatname', 'Unknown')
     
     print(f"\n[CHAT] {speaker}: {message}")
+    
+    # Track known speakers (for nickname resolution)
+    if speaker and speaker != 'Unknown' and speaker not in _known_speakers:
+        _known_speakers.add(speaker)
+        save_known_speakers()
     
     # Ignore messages from our own bot (prevents self-triggering)
     if speaker.lower() in ['gem', 'gem_chadee', 'gem-chadee']:
@@ -417,18 +469,37 @@ async def get_memory_context(speaker: str, message: str) -> str:
                     memory_context += f"\n- {result}"
             
             # 2. Search for entities mentioned in message
+            # First, check if any known speaker is mentioned (case-insensitive)
+            message_lower = message.lower()
+            mentioned_speakers = []
+            for known in _known_speakers:
+                known_clean = known.lower().lstrip('@')
+                # Check if the full username or a meaningful part is mentioned
+                if known_clean in message_lower:
+                    mentioned_speakers.append(known)
+                elif len(known_clean) >= 4 and known_clean[:4] in message_lower:
+                    mentioned_speakers.append(known)
+            
+            # Also extract capitalized words as fallback
             entities = re.findall(r'\b[A-Z][a-z]+\b', message)
             entities = [e for e in entities if e.lower() not in config.STOP_WORDS]
             
+            # Combine: known speakers first, then generic entities
+            search_terms = mentioned_speakers[:3]
             for entity in entities[:3]:
-                entity_results = await cognee.recall(f"[chat] {entity}:", top_k=3)
+                resolved = resolve_speaker_name(entity)
+                if resolved not in search_terms:
+                    search_terms.append(resolved)
+            
+            for term in search_terms[:3]:
+                entity_results = await cognee.recall(f"[chat] {term}:", top_k=3)
                 if not entity_results:
-                    entity_results = await cognee.recall(f"{entity}:", top_k=3)
+                    entity_results = await cognee.recall(f"{term}:", top_k=3)
                 if not entity_results:
-                    entity_results = await cognee.recall(f"{entity}", top_k=3)
+                    entity_results = await cognee.recall(f"{term}", top_k=3)
                 
                 if entity_results:
-                    memory_context += f"\n\nThings you remember about {entity}:"
+                    memory_context += f"\n\nThings you remember about {term}:"
                     for result in entity_results:
                         memory_context += f"\n- {result}"
     except (asyncio.TimeoutError, Exception):

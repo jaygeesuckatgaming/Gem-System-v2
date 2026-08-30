@@ -29,8 +29,6 @@ class CogneeClient:
 
     async def remember(self, speaker: str, text: str, source: str = "chat", session_id: Optional[str] = None):
         """Add message to Cognee memory (fire-and-forget, non-blocking)"""
-        if not self.enabled:
-            return
 
         async def _do_remember():
             try:
@@ -43,6 +41,7 @@ class CogneeClient:
                     }
                     response = await client.post(f"{self.server_url}/remember", json=payload)
                     if response.status_code == 200:
+                        self.enabled = True
                         print(f"✓ Cognee remembered: {speaker}: {text[:50]}")
             except Exception as e:
                 print(f"✗ Cognee remember failed: {e}")
@@ -52,9 +51,6 @@ class CogneeClient:
 
     async def recall(self, query: str, session_id: Optional[str] = None, top_k: int = 10) -> List[str]:
         """Query Cognee memory (with short timeout to avoid blocking chat)"""
-        if not self.enabled:
-            return []
-
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 payload = {
@@ -64,6 +60,7 @@ class CogneeClient:
                 }
                 response = await client.post(f"{self.server_url}/recall", json=payload)
                 if response.status_code == 200:
+                    self.enabled = True
                     data = response.json()
                     results = data.get("results", [])
                     source = data.get("source", "unknown")
