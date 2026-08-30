@@ -67,37 +67,21 @@ vision_app = Flask("VisionService")
 # --- 2. CORE FUNCTIONS ---
 # ------------------------------------------------------------------------------
 def load_config():
-    """Loads all settings from mcp_settings.ini."""
+    """Loads all settings from config.py (single source of truth)."""
     global config
-    parser = configparser.ConfigParser()
-    # Use absolute path relative to this script's location
-    config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mcp_settings.ini')
-    if not os.path.exists(config_file):
-        sys.exit(f"FATAL: Config '{config_file}' not found.")
-    
-    parser.read(config_file)
-    settings = {}
-    try:
-        # --- Read from [VisionService] section ---
-        settings['enable_local_vlm'] = parser.getboolean('VisionService', 'enable_local_vlm', fallback=False)
-        settings['camera_index'] = parser.getint('VisionService', 'camera_index', fallback=0)
-        settings['image_source'] = parser.get('VisionService', 'image_source', fallback='cam').lower()
-        settings['ndi_source_name'] = parser.get('VisionService', 'ndi_source_name', fallback='')
-        raw_triggers = parser.get('VisionService', 'vision_trigger_words', fallback='')
-        settings['vision_trigger_words'] = [word.strip().lower() for word in raw_triggers.split(',') if word.strip()]
-        
-        # Load the VLM Model ID only if local VLM is enabled
-        if settings['enable_local_vlm']:
-            settings['smol_vlm_model_id'] = parser.get('VisionService', 'smol_vlm_model_id')
+    # Import config.py from the project root
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, project_root)
+    import config as cfg
 
-        # --- Read from [MCP] section and build the URL ---
-        mcp_host = parser.get('MCP', 'host')
-        mcp_port = parser.get('MCP', 'port')
-        settings['mcp_url'] = f"http://{mcp_host}:{mcp_port}/"
-        
-    except (configparser.NoSectionError, configparser.NoOptionError, Exception) as e:
-        sys.exit(f"FATAL: Setting missing or invalid in '{config_file}'. Please check your sections and keys. Details: {e}")
-    
+    settings = {}
+    settings['enable_local_vlm'] = False
+    settings['camera_index'] = getattr(cfg, 'VISION_CAMERA_INDEX', 0)
+    settings['image_source'] = getattr(cfg, 'VISION_IMAGE_SOURCE', 'cam').lower()
+    settings['ndi_source_name'] = getattr(cfg, 'VISION_NDI_SOURCE_NAME', '')
+    settings['vision_trigger_words'] = getattr(cfg, 'VISION_TRIGGER_WORDS', [])
+    settings['mcp_url'] = f"http://{getattr(cfg, 'SERVER_HOST', '127.0.0.1')}:{getattr(cfg, 'SERVER_PORT', 5000)}/"
+
     config = settings
 
 def initialize_models():

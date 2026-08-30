@@ -104,6 +104,14 @@ class ControlPanel(ctk.CTk):
         self.status_music = ctk.CTkLabel(status_frame, text="Music: Checking...", font=ctk.CTkFont(size=16))
         self.status_music.pack(anchor="w", padx=20, pady=10)
         
+        # OpenCode status
+        self.status_opencode = ctk.CTkLabel(status_frame, text="OpenCode: Checking...", font=ctk.CTkFont(size=16))
+        self.status_opencode.pack(anchor="w", padx=20, pady=10)
+        
+        # Vision status
+        self.status_vision = ctk.CTkLabel(status_frame, text="Vision: Checking...", font=ctk.CTkFont(size=16))
+        self.status_vision.pack(anchor="w", padx=20, pady=10)
+        
         # Refresh button
         refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
         refresh_btn.pack(pady=20)
@@ -1281,6 +1289,26 @@ class ControlPanel(ctk.CTk):
         save_osc_btn = ctk.CTkButton(osc_config_frame, text="Save OSC", width=80, command=self.save_osc_settings)
         save_osc_btn.pack(side="left", padx=10, pady=10)
         
+        # --- LiveLink Settings ---
+        livelink_section = ctk.CTkLabel(scroll_frame, text="LiveLink (Unreal Engine)", font=ctk.CTkFont(size=16, weight="bold"))
+        livelink_section.pack(anchor="w", pady=(15, 5))
+        
+        livelink_frame = ctk.CTkFrame(scroll_frame)
+        livelink_frame.pack(fill="x", pady=5)
+        
+        livelink_ip_label = ctk.CTkLabel(livelink_frame, text="IP:", font=ctk.CTkFont(size=13))
+        livelink_ip_label.pack(side="left", padx=(10, 5), pady=10)
+        self.livelink_ip_entry = ctk.CTkEntry(livelink_frame, width=140)
+        self.livelink_ip_entry.pack(side="left", padx=5, pady=10)
+        
+        livelink_port_label = ctk.CTkLabel(livelink_frame, text="Port:", font=ctk.CTkFont(size=13))
+        livelink_port_label.pack(side="left", padx=(10, 5), pady=10)
+        self.livelink_port_entry = ctk.CTkEntry(livelink_frame, width=80)
+        self.livelink_port_entry.pack(side="left", padx=5, pady=10)
+        
+        save_livelink_btn = ctk.CTkButton(livelink_frame, text="Save LiveLink", width=110, command=self.save_livelink_settings)
+        save_livelink_btn.pack(side="left", padx=10, pady=10)
+        
         # Quick emote buttons
         emote_label = ctk.CTkLabel(scroll_frame, text="Quick Emote Buttons:", font=ctk.CTkFont(size=13))
         emote_label.pack(anchor="w", pady=(10, 5))
@@ -1358,6 +1386,12 @@ class ControlPanel(ctk.CTk):
                 self.osc_port_entry.insert(0, str(osc.get('port', 10000)))
                 self.osc_address_entry.delete(0, "end")
                 self.osc_address_entry.insert(0, osc.get('address', '/chat/message'))
+                
+                livelink = neuro.get('livelink', {})
+                self.livelink_ip_entry.delete(0, "end")
+                self.livelink_ip_entry.insert(0, livelink.get('ip', '10.237.43.193'))
+                self.livelink_port_entry.delete(0, "end")
+                self.livelink_port_entry.insert(0, str(livelink.get('port', 11111)))
         except Exception as e:
             print(f"Failed to load Neurosync settings: {e}")
     
@@ -1392,6 +1426,21 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             self.emote_status_label.configure(text="Save failed!", text_color="red")
             print(f"Failed to save OSC settings: {e}")
+    
+    def save_livelink_settings(self):
+        """Save LiveLink settings to server"""
+        try:
+            payload = {
+                'livelink_ip': self.livelink_ip_entry.get().strip(),
+                'livelink_port': int(self.livelink_port_entry.get().strip())
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                self.emote_status_label.configure(text="LiveLink settings saved!", text_color="green")
+                print("✓ LiveLink settings saved")
+        except Exception as e:
+            self.emote_status_label.configure(text="Save failed!", text_color="red")
+            print(f"Failed to save LiveLink settings: {e}")
     
     def send_test_emote(self, emote_name):
         """Send a test emote via OSC"""
@@ -1919,16 +1968,20 @@ class ControlPanel(ctk.CTk):
                 self.status_music.configure(text="Music: ✓ Ready", text_color="green")
                 
                 # OpenCode status
-                if data.get('opencode', {}).get('enabled'):
+                if data.get('opencode', {}).get('connected'):
                     self.opencode_status.configure(text="Status: ✓ Connected", text_color="green")
+                    self.status_opencode.configure(text="OpenCode: ✓ Connected", text_color="green")
                 else:
                     self.opencode_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_opencode.configure(text="OpenCode: ✗ Disconnected", text_color="red")
                 
                 # Vision status
-                if data.get('vision', {}).get('enabled'):
+                if data.get('vision', {}).get('connected'):
                     self.vision_status.configure(text="Status: ✓ Connected", text_color="green")
+                    self.status_vision.configure(text="Vision: ✓ Connected", text_color="green")
                 else:
                     self.vision_status.configure(text="Status: ✗ Disconnected", text_color="red")
+                    self.status_vision.configure(text="Vision: ✗ Disconnected", text_color="red")
         except Exception as e:
             self._server_reachable = False
             self.llm_status.configure(text="Status: ✗ Server unreachable", text_color="red")
@@ -1940,6 +1993,8 @@ class ControlPanel(ctk.CTk):
             self.status_cognee.configure(text="Cognee: ✗ Server unreachable", text_color="red")
             self.status_tts.configure(text="TTS: ✗ Server unreachable", text_color="red")
             self.status_music.configure(text="Music: ✗ Server unreachable", text_color="red")
+            self.status_opencode.configure(text="OpenCode: ✗ Server unreachable", text_color="red")
+            self.status_vision.configure(text="Vision: ✗ Server unreachable", text_color="red")
     
     def load_all_settings(self):
         """Load all settings from server (called once when server becomes reachable)"""

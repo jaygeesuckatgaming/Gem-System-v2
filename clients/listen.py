@@ -44,31 +44,26 @@ silent_frames_count = 0
 
 def load_settings_from_ini():
     """
-    Loads MCP URL and the selected audio device ID from mcp_settings.ini.
+    Loads MCP URL and the selected audio device ID from config.py (single source of truth).
     """
-    ini_path = 'mcp_settings.ini'
-    print(f"AUDIO INFO: Reading configuration from {ini_path}...")
-    
-    if not os.path.exists(ini_path):
-        sys.exit(f"FATAL ERROR: The main configuration file '{ini_path}' was not found.")
-        
-    config = configparser.ConfigParser()
-    config.read(ini_path)
-    
+    # Import config.py from the project root
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+    import config as cfg
+
     settings = {}
     
     try:
-        # Get the MCP URL from the [MCP] section
-        host = config.get('MCP', 'host')
-        port = config.get('MCP', 'port')
-        # NOTE: Adjust the '/process' endpoint if your MCP server uses a different one
+        # Get the MCP URL from config.py
+        host = getattr(cfg, 'SERVER_HOST', '127.0.0.1')
+        port = getattr(cfg, 'SERVER_PORT', 5000)
         settings['mcp_url'] = f"http://{host}:{port}/process"
         print(f"AUDIO INFO: MCP URL set to -> {settings['mcp_url']}")
 
-        # Get the audio input device string from the [Audio] section
-        device_string = config.get('Audio', 'selected_input')
+        # Get the audio input device string from config.py
+        device_string = getattr(cfg, 'AUDIO_INPUT_DEVICE', '')
         if not device_string or device_string.lower() == 'none':
-            raise ValueError("No input device is selected in the INI file. Please run the main MCP GUI to select one.")
+            raise ValueError("No input device is selected. Please run the main MCP GUI to select one.")
         
         print(f"AUDIO INFO: Found saved input device -> '{device_string}'")
 
@@ -88,8 +83,6 @@ def load_settings_from_ini():
         
         print(f"AUDIO INFO: Successfully parsed and validated device ID -> {settings['device_id']}")
 
-    except (configparser.NoSectionError, configparser.NoOptionError) as e:
-        sys.exit(f"FATAL ERROR: A required setting is missing from {ini_path}. Details: {e}")
     except ValueError as e:
         sys.exit(f"FATAL ERROR: Problem with the audio device setting. Details: {e}")
         

@@ -7,7 +7,10 @@ import asyncio
 import html
 import json
 import os
+import re
 from collections import deque
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from quart import Quart, request, jsonify
 from quart_cors import cors
 
@@ -78,87 +81,78 @@ def save_known_speakers():
 
 load_known_speakers()
 
-# Settings persistence file
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+# Settings persistence: config.py is the single source of truth.
+# Runtime changes are written back to config.py so all processes read the same values.
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.py")
 
 
-def load_persisted_settings():
-    """Load settings from settings.json (overrides config.py defaults)"""
-    if not os.path.exists(SETTINGS_FILE):
-        return
+def save_config():
+    """Write current runtime settings back to config.py (single source of truth)."""
+    import re
     try:
-        with open(SETTINGS_FILE, "r") as f:
-            data = json.load(f)
-        
-        if 'tts_enabled' in data:
-            config.TTS_ENABLED = data['tts_enabled']
-        if 'tts_url' in data:
-            config.TTS_URL = data['tts_url']
-            tts.tts_url = data['tts_url']
-        if 'tts_diffusion_steps' in data:
-            config.TTS_DIFFUSION_STEPS = data['tts_diffusion_steps']
-        if 'tts_embedding_scale' in data:
-            config.TTS_EMBEDDING_SCALE = data['tts_embedding_scale']
-        if 'tts_alpha' in data:
-            config.TTS_ALPHA = data['tts_alpha']
-        if 'tts_beta' in data:
-            config.TTS_BETA = data['tts_beta']
-        if 'tts_reference_voice' in data:
-            config.TTS_REFERENCE_VOICE = data['tts_reference_voice']
-        if 'audio_player_enabled' in data:
-            config.AUDIO_PLAYER_ENABLED = data['audio_player_enabled']
-        if 'audio_output_device' in data:
-            config.AUDIO_OUTPUT_DEVICE = data['audio_output_device']
-        if 'audio_ducking_enabled' in data:
-            config.AUDIO_DUCKING_ENABLED = data['audio_ducking_enabled']
-        if 'audio_duck_amount' in data:
-            config.AUDIO_DUCK_AMOUNT = data['audio_duck_amount']
-        if 'audio_duck_attack_ms' in data:
-            config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
-        if 'audio_duck_release_ms' in data:
-            config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
-        if 'osc_actions' in data:
-            config.OSC_ACTIONS = data['osc_actions']
-        if 'vision_image_source' in data:
-            config.VISION_IMAGE_SOURCE = data['vision_image_source']
-        if 'vision_camera_index' in data:
-            config.VISION_CAMERA_INDEX = data['vision_camera_index']
-        if 'vision_ndi_source_name' in data:
-            config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
-    except Exception as e:
-        print(f"Failed to load settings.json: {e}")
+        with open(CONFIG_FILE, "r") as f:
+            content = f.read()
 
-
-def save_persisted_settings():
-    """Save TTS settings to settings.json"""
-    try:
-        data = {
-            'tts_enabled': config.TTS_ENABLED,
-            'tts_url': config.TTS_URL,
-            'tts_diffusion_steps': config.TTS_DIFFUSION_STEPS,
-            'tts_embedding_scale': config.TTS_EMBEDDING_SCALE,
-            'tts_alpha': config.TTS_ALPHA,
-            'tts_beta': config.TTS_BETA,
-            'tts_reference_voice': config.TTS_REFERENCE_VOICE,
-            'audio_player_enabled': config.AUDIO_PLAYER_ENABLED,
-            'audio_output_device': config.AUDIO_OUTPUT_DEVICE,
-            'audio_ducking_enabled': config.AUDIO_DUCKING_ENABLED,
-            'audio_duck_amount': config.AUDIO_DUCK_AMOUNT,
-            'audio_duck_attack_ms': config.AUDIO_DUCK_ATTACK_MS,
-            'audio_duck_release_ms': config.AUDIO_DUCK_RELEASE_MS,
-            'osc_actions': config.OSC_ACTIONS,
-            'vision_image_source': config.VISION_IMAGE_SOURCE,
-            'vision_camera_index': config.VISION_CAMERA_INDEX,
-            'vision_ndi_source_name': config.VISION_NDI_SOURCE_NAME
+        # Map of setting name -> (value, is_string)
+        settings = {
+            'TTS_ENABLED': (config.TTS_ENABLED, False),
+            'TTS_URL': (config.TTS_URL, True),
+            'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
+            'TTS_EMBEDDING_SCALE': (config.TTS_EMBEDDING_SCALE, False),
+            'TTS_ALPHA': (config.TTS_ALPHA, False),
+            'TTS_BETA': (config.TTS_BETA, False),
+            'TTS_REFERENCE_VOICE': (config.TTS_REFERENCE_VOICE, True),
+            'AUDIO_PLAYER_ENABLED': (config.AUDIO_PLAYER_ENABLED, False),
+            'AUDIO_OUTPUT_DEVICE': (config.AUDIO_OUTPUT_DEVICE, True),
+            'AUDIO_INPUT_DEVICE': (config.AUDIO_INPUT_DEVICE, True),
+            'AUDIO_DUCKING_ENABLED': (config.AUDIO_DUCKING_ENABLED, False),
+            'AUDIO_DUCK_AMOUNT': (config.AUDIO_DUCK_AMOUNT, False),
+            'AUDIO_DUCK_ATTACK_MS': (config.AUDIO_DUCK_ATTACK_MS, False),
+            'AUDIO_DUCK_RELEASE_MS': (config.AUDIO_DUCK_RELEASE_MS, False),
+            'BLENDSHAPE_MOUTH_SCALE': (config.BLENDSHAPE_MOUTH_SCALE, False),
+            'BLENDSHAPE_EYE_SCALE': (config.BLENDSHAPE_EYE_SCALE, False),
+            'BLENDSHAPE_EYEBROW_SCALE': (config.BLENDSHAPE_EYEBROW_SCALE, False),
+            'BLENDSHAPE_EYEWIDE_SCALE': (config.BLENDSHAPE_EYEWIDE_SCALE, False),
+            'BLENDSHAPE_EYESQUINT_SCALE': (config.BLENDSHAPE_EYESQUINT_SCALE, False),
+            'OSC_ENABLED': (config.OSC_ENABLED, False),
+            'OSC_IP': (config.OSC_IP, True),
+            'OSC_PORT': (config.OSC_PORT, False),
+            'OSC_ADDRESS': (config.OSC_ADDRESS, True),
+            'LIVELINK_IP': (config.LIVELINK_IP, True),
+            'LIVELINK_PORT': (config.LIVELINK_PORT, False),
+            'TWITCH_MUSIC_CHECK_ENABLED': (config.TWITCH_MUSIC_CHECK_ENABLED, False),
+            'VOICE_SPEAKER_NAME': (config.VOICE_SPEAKER_NAME, True),
+            'OPENCODE_ENABLED': (config.OPENCODE_ENABLED, False),
+            'OPENCODE_API_URL': (config.OPENCODE_API_URL, True),
+            'OPENCODE_WORKSPACE': (config.OPENCODE_WORKSPACE, True),
+            'VISION_ENABLED': (config.VISION_ENABLED, False),
+            'VISION_SCAN_URL': (config.VISION_SCAN_URL, True),
+            'VISION_GET_IMAGE_URL': (config.VISION_GET_IMAGE_URL, True),
+            'VISION_IMAGE_SOURCE': (config.VISION_IMAGE_SOURCE, True),
+            'VISION_CAMERA_INDEX': (config.VISION_CAMERA_INDEX, False),
+            'VISION_NDI_SOURCE_NAME': (config.VISION_NDI_SOURCE_NAME, True),
+            'SSN_SESSION_ID': (config.SSN_SESSION_ID, True),
+            'OLLAMA_MODEL': (config.OLLAMA_MODEL, True),
         }
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+
+        for key, (value, is_string) in settings.items():
+            if is_string:
+                new_value = f'"{value}"'
+            else:
+                new_value = str(value)
+            # Replace the assignment line
+            pattern = re.compile(rf'^{key}\s*=\s*.*$', re.MULTILINE)
+            content = pattern.sub(f'{key} = {new_value}', content)
+
+        with open(CONFIG_FILE, "w") as f:
+            f.write(content)
+        print("✓ Settings written to config.py")
     except Exception as e:
-        print(f"Failed to save settings.json: {e}")
+        print(f"Failed to save config.py: {e}")
 
 
-# Load persisted settings on startup
-load_persisted_settings()
+# config.py is the single source of truth - no separate load needed.
+# Runtime changes are written back to config.py via save_config().
 
 
 def extract_song_command(text: str):
@@ -293,6 +287,105 @@ def resolve_speaker_name(name: str) -> str:
     return name
 
 
+# Common city -> IANA timezone mapping (no external geocoding needed)
+_CITY_TIMEZONES = {
+    'pattaya': 'Asia/Bangkok',
+    'bangkok': 'Asia/Bangkok',
+    'thailand': 'Asia/Bangkok',
+    'phuket': 'Asia/Bangkok',
+    'chiang mai': 'Asia/Bangkok',
+    'london': 'Europe/London',
+    'new york': 'America/New_York',
+    'nyc': 'America/New_York',
+    'los angeles': 'America/Los_Angeles',
+    'la': 'America/Los_Angeles',
+    'chicago': 'America/Chicago',
+    'tokyo': 'Asia/Tokyo',
+    'sydney': 'Australia/Sydney',
+    'paris': 'Europe/Paris',
+    'berlin': 'Europe/Berlin',
+    'dubai': 'Asia/Dubai',
+    'singapore': 'Asia/Singapore',
+    'hong kong': 'Asia/Hong_Kong',
+    'seoul': 'Asia/Seoul',
+    'mumbai': 'Asia/Kolkata',
+    'delhi': 'Asia/Kolkata',
+    'manila': 'Asia/Manila',
+    'jakarta': 'Asia/Jakarta',
+    'moscow': 'Europe/Moscow',
+    'toronto': 'America/Toronto',
+    'vancouver': 'America/Vancouver',
+    'mexico city': 'America/Mexico_City',
+    'sao paulo': 'America/Sao_Paulo',
+    'amsterdam': 'Europe/Amsterdam',
+    'madrid': 'Europe/Madrid',
+    'rome': 'Europe/Rome',
+    'stockholm': 'Europe/Stockholm',
+    'oslo': 'Europe/Oslo',
+    'copenhagen': 'Europe/Copenhagen',
+    'helsinki': 'Europe/Helsinki',
+    'athens': 'Europe/Athens',
+    'istanbul': 'Europe/Istanbul',
+    'cairo': 'Africa/Cairo',
+    'johannesburg': 'Africa/Johannesburg',
+    'lagos': 'Africa/Lagos',
+    'nairobi': 'Africa/Nairobi',
+    'auckland': 'Pacific/Auckland',
+    'honolulu': 'Pacific/Honolulu',
+}
+
+
+def get_time_for_location(location_name: str) -> str:
+    """Return the current time for a location using IANA timezones."""
+    if not location_name:
+        return "No location specified."
+
+    loc_lower = location_name.lower().strip()
+    tz_name = _CITY_TIMEZONES.get(loc_lower)
+
+    if not tz_name:
+        # Try partial match against known cities
+        for city, tz in _CITY_TIMEZONES.items():
+            if city in loc_lower or loc_lower in city:
+                tz_name = tz
+                break
+
+    if not tz_name:
+        return f"I couldn't find the timezone for '{location_name}'."
+
+    try:
+        target_time = datetime.now(ZoneInfo(tz_name))
+        formatted_time = target_time.strftime("%I:%M %p on %A")
+        city_name = location_name.strip()
+        return f"The time in {city_name} is {formatted_time}."
+    except Exception as e:
+        print(f"Time lookup failed: {e}")
+        return "I had trouble looking up the time."
+
+
+def is_time_command(text: str) -> bool:
+    """Check if a message is asking for the current time."""
+    text_lower = text.lower().strip()
+    return any(
+        k in text_lower
+        for k in ["time is it", "what time", "current time", "what's the time", "whats the time"]
+    )
+
+
+def extract_time_location(text: str) -> str:
+    """Extract a location from a time query, defaulting to Pattaya."""
+    text_lower = text.lower().strip()
+    # Remove common time-query phrases
+    for phrase in ["what time is it in", "what time is it", "what's the time in",
+                   "whats the time in", "what's the time", "whats the time",
+                   "current time in", "current time", "time in", "time is it in"]:
+        text_lower = text_lower.replace(phrase, "")
+    text_lower = text_lower.strip(" ?.,!").strip()
+    if not text_lower:
+        return "Pattaya"
+    return text_lower
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # Extract message data
@@ -416,6 +509,26 @@ async def handle_incoming_message(data: dict):
         await ssn.send_message(response, targets=config.SSN_TARGETS)
         return
     
+    # Check for time query (intercept before LLM so it uses the real time)
+    if is_time_command(message):
+        print(f"🕐 Time command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        location = extract_time_location(message)
+        time_ctx = get_time_for_location(location)
+        print(f"🕐 Time context: '{time_ctx}'")
+        # Force the LLM to use the actual time, not make up its own answer
+        response = await llm.chat(
+            f"{time_ctx} User asks: '{message}'. Give ONLY the actual time shown above, be concise.",
+            system_prompt=config.SYSTEM_PROMPT
+        )
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        if config.TTS_ENABLED:
+            await tts.speak(response)
+        await ssn.send_message(response, targets=config.SSN_TARGETS)
+        return
+
     # Store user message in memory
     await cognee.remember(speaker, message)
     
@@ -439,11 +552,11 @@ async def handle_incoming_message(data: dict):
     # Track response to prevent echo
     _last_ai_responses.append(html.unescape(response).strip())
     
-    # Send response to TTS (if enabled)
+    # Send response to TTS first (it takes time to synthesize)
     if config.TTS_ENABLED:
         await tts.speak(response)
     
-    # Send response to SSN
+    # Send response to SSN (chat appears after audio is ready)
     await ssn.send_message(response, targets=config.SSN_TARGETS)
 
 
@@ -565,15 +678,21 @@ async def api_status():
                 'ip': config.OSC_IP,
                 'port': config.OSC_PORT,
                 'address': config.OSC_ADDRESS
+            },
+            'livelink': {
+                'ip': config.LIVELINK_IP,
+                'port': config.LIVELINK_PORT
             }
         },
         'opencode': {
             'enabled': config.OPENCODE_ENABLED,
+            'connected': opencode.enabled,
             'api_url': config.OPENCODE_API_URL,
             'workspace': config.OPENCODE_WORKSPACE
         },
         'vision': {
             'enabled': config.VISION_ENABLED,
+            'connected': vision.enabled,
             'scan_url': config.VISION_SCAN_URL,
             'get_image_url': config.VISION_GET_IMAGE_URL,
             'image_source': config.VISION_IMAGE_SOURCE,
@@ -621,37 +740,19 @@ async def api_audio_input_devices():
 
 @app.route('/api/audio/input_device', methods=['GET'])
 async def api_audio_get_input_device():
-    """Get the current input device from mcp_settings.ini"""
-    import configparser
-    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
-    try:
-        parser = configparser.ConfigParser()
-        parser.read(ini_path)
-        selected = parser.get('Audio', 'selected_input', fallback='')
-    except Exception:
-        selected = ''
-    return jsonify({'status': 'ok', 'selected_input': selected})
+    """Get the current input device from config.py"""
+    return jsonify({'status': 'ok', 'selected_input': config.AUDIO_INPUT_DEVICE})
 
 
 @app.route('/api/audio/input_device', methods=['POST'])
 async def api_audio_set_input_device():
-    """Set the input device in mcp_settings.ini"""
-    import configparser
+    """Set the input device in config.py"""
     data = await request.get_json()
     device_string = data.get('device', '')
     
-    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
-    try:
-        parser = configparser.ConfigParser()
-        parser.read(ini_path)
-        if not parser.has_section('Audio'):
-            parser.add_section('Audio')
-        parser.set('Audio', 'selected_input', device_string)
-        with open(ini_path, 'w') as f:
-            parser.write(f)
-        return jsonify({'status': 'ok'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+    config.AUDIO_INPUT_DEVICE = device_string
+    save_config()
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/api/settings', methods=['GET'])
@@ -731,6 +832,10 @@ async def api_update_settings():
         config.OSC_ADDRESS = data['osc_address']
     if 'osc_actions' in data:
         config.OSC_ACTIONS = data['osc_actions']
+    if 'livelink_ip' in data:
+        config.LIVELINK_IP = data['livelink_ip']
+    if 'livelink_port' in data:
+        config.LIVELINK_PORT = data['livelink_port']
     if 'opencode_enabled' in data:
         config.OPENCODE_ENABLED = data['opencode_enabled']
     if 'opencode_api_url' in data:
@@ -756,33 +861,10 @@ async def api_update_settings():
     if 'vision_ndi_source_name' in data:
         config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
     
-    # Persist TTS settings to file
-    save_persisted_settings()
-    
-    # Also write vision settings to mcp_settings.ini (read by vision.py)
-    if any(k in data for k in ('vision_image_source', 'vision_camera_index', 'vision_ndi_source_name')):
-        save_vision_ini_settings()
+    # Persist settings to config.py (single source of truth)
+    save_config()
     
     return jsonify({'status': 'ok'})
-
-
-def save_vision_ini_settings():
-    """Write vision settings to mcp_settings.ini (read by vision.py)"""
-    import configparser
-    ini_path = os.path.join(os.path.dirname(__file__), "mcp_settings.ini")
-    try:
-        parser = configparser.ConfigParser()
-        parser.read(ini_path)
-        if not parser.has_section('VisionService'):
-            parser.add_section('VisionService')
-        parser.set('VisionService', 'image_source', config.VISION_IMAGE_SOURCE)
-        parser.set('VisionService', 'camera_index', str(config.VISION_CAMERA_INDEX))
-        parser.set('VisionService', 'ndi_source_name', config.VISION_NDI_SOURCE_NAME)
-        with open(ini_path, 'w') as f:
-            parser.write(f)
-        print("✓ Vision settings written to mcp_settings.ini")
-    except Exception as e:
-        print(f"Failed to write vision INI settings: {e}")
 
 
 @app.route('/api/vision/image', methods=['GET'])
@@ -819,7 +901,7 @@ async def api_osc_actions_set():
     data = await request.get_json()
     actions = data.get('actions', [])
     config.OSC_ACTIONS = actions
-    save_persisted_settings()
+    save_config()
     return jsonify({'status': 'ok'})
 
 
@@ -1016,6 +1098,30 @@ async def api_music_background_volume():
     return jsonify({'status': 'ok' if success else 'error'})
 
 
+@app.route('/api/music/duck', methods=['POST'])
+async def api_music_duck():
+    """Duck background music (lower volume) when TTS speaks"""
+    if not config.AUDIO_DUCKING_ENABLED:
+        return jsonify({'status': 'ok', 'ducked': False})
+    data = await request.get_json(silent=True) or {}
+    music.duck_music(
+        duck_amount=data.get('duck_amount', config.AUDIO_DUCK_AMOUNT),
+        attack_ms=data.get('attack_ms', config.AUDIO_DUCK_ATTACK_MS),
+        release_ms=data.get('release_ms', config.AUDIO_DUCK_RELEASE_MS)
+    )
+    return jsonify({'status': 'ok', 'ducked': True})
+
+
+@app.route('/api/music/unduck', methods=['POST'])
+async def api_music_unduck():
+    """Restore background music volume after TTS finishes"""
+    if not config.AUDIO_DUCKING_ENABLED:
+        return jsonify({'status': 'ok', 'unducked': False})
+    data = await request.get_json(silent=True) or {}
+    music.unduck_music(release_ms=data.get('release_ms', config.AUDIO_DUCK_RELEASE_MS))
+    return jsonify({'status': 'ok', 'unducked': True})
+
+
 @app.route('/chat', methods=['POST'])
 async def chat():
     """HTTP chat endpoint (alternative to WebSocket)"""
@@ -1035,6 +1141,14 @@ async def process():
         return jsonify({'status': 'error', 'error': 'No text provided'}), 400
     
     print(f"\n[VOICE] {text}")
+    
+    # Prevent echo loop - ignore if the transcribed text matches a recent AI response
+    # (the microphone picks up Gem's own voice and re-transcribes it)
+    text_clean = html.unescape(text).strip()
+    for last_response in _last_ai_responses:
+        if text_clean == last_response:
+            print(f"  → Ignoring echo of last AI response")
+            return jsonify({'status': 'ok', 'ignored': 'echo'})
     
     # Voice input doesn't need a wake word - process directly
     # Check for song command
@@ -1079,22 +1193,24 @@ async def process():
     # Track response to prevent echo
     _last_ai_responses.append(html.unescape(response).strip())
     
-    # Send response to TTS (if enabled)
+    # Send response to TTS first (it takes time to synthesize)
     if config.TTS_ENABLED:
         await tts.speak(response)
     
-    # Send response to SSN
+    # Send response to SSN (chat appears after audio is ready)
     await ssn.send_message(response, targets=config.SSN_TARGETS)
     
     return jsonify({'status': 'ok', 'response': response})
 
 
 async def start_background_tasks():
-    """Start SSN WebSocket listener in background"""
-    # Wire the message callback
-    ssn.on_message = handle_incoming_message
-    # Start WebSocket listener
-    asyncio.create_task(ssn.start_websocket_listener())
+    """Start background tasks"""
+    # NOTE: SSN chat is received via HTTP POST (the "post" feature), not WebSocket.
+    # The WebSocket listener is disabled to prevent duplicate message processing.
+    # If you switch to WebSocket-only chat, re-enable by uncommenting below:
+    # ssn.on_message = handle_incoming_message
+    # asyncio.create_task(ssn.start_websocket_listener())
+    pass
 
 
 @app.before_serving
