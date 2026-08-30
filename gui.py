@@ -961,6 +961,94 @@ class ControlPanel(ctk.CTk):
         
         self.bg_status_label = ctk.CTkLabel(scroll_frame, text="Background: None", font=ctk.CTkFont(size=13))
         self.bg_status_label.pack(anchor="w", pady=5)
+        
+        # --- Player Controls ---
+        controls_frame = ctk.CTkFrame(scroll_frame)
+        controls_frame.pack(fill="x", pady=10)
+        
+        # Play/Pause button
+        self.bg_play_pause_btn = ctk.CTkButton(controls_frame, text="⏸ Pause", width=80, command=self.toggle_background_pause)
+        self.bg_play_pause_btn.pack(side="left", padx=10, pady=10)
+        
+        # Progress bar
+        self.bg_progress_bar = ctk.CTkProgressBar(controls_frame)
+        self.bg_progress_bar.pack(side="left", fill="x", expand=True, padx=10, pady=10)
+        self.bg_progress_bar.set(0)
+        
+        # Time label
+        self.bg_time_label = ctk.CTkLabel(controls_frame, text="0:00 / 0:00", font=ctk.CTkFont(size=12))
+        self.bg_time_label.pack(side="left", padx=10, pady=10)
+        
+        # Volume slider
+        volume_label = ctk.CTkLabel(scroll_frame, text="Volume:", font=ctk.CTkFont(size=13))
+        volume_label.pack(anchor="w", pady=(5, 0))
+        
+        self.bg_volume_slider = ctk.CTkSlider(scroll_frame, from_=0.0, to=1.0, number_of_steps=20, command=self.set_background_volume)
+        self.bg_volume_slider.pack(fill="x", pady=5)
+        self.bg_volume_slider.set(1.0)
+        
+        # Start progress polling
+        self.after(500, self.update_background_progress)
+    
+    def toggle_background_pause(self):
+        """Toggle pause/resume for background music"""
+        try:
+            if self.bg_play_pause_btn.cget("text") == "⏸ Pause":
+                response = httpx.post(f"{SERVER_URL}/api/music/background/pause", json={}, timeout=5)
+                if response.status_code == 200:
+                    self.bg_play_pause_btn.configure(text="▶ Play")
+            else:
+                response = httpx.post(f"{SERVER_URL}/api/music/background/pause", json={"resume": True}, timeout=5)
+                if response.status_code == 200:
+                    self.bg_play_pause_btn.configure(text="⏸ Pause")
+        except Exception as e:
+            print(f"Failed to toggle pause: {e}")
+    
+    def set_background_volume(self, value):
+        """Set background music volume"""
+        try:
+            httpx.post(f"{SERVER_URL}/api/music/background/volume", json={"volume": value}, timeout=5)
+        except Exception as e:
+            print(f"Failed to set volume: {e}")
+    
+    def update_background_progress(self):
+        """Update the progress bar and time label"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/music/background/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                position = data.get('position', 0)
+                duration = data.get('duration', 0)
+                paused = data.get('paused', False)
+                
+                # Update progress bar
+                if duration > 0:
+                    self.bg_progress_bar.set(min(1.0, position / duration))
+                else:
+                    self.bg_progress_bar.set(0)
+                
+                # Update time label
+                pos_str = self._format_time(position)
+                dur_str = self._format_time(duration)
+                self.bg_time_label.configure(text=f"{pos_str} / {dur_str}")
+                
+                # Update play/pause button
+                if paused:
+                    self.bg_play_pause_btn.configure(text="▶ Play")
+                else:
+                    self.bg_play_pause_btn.configure(text="⏸ Pause")
+        except Exception:
+            pass
+        
+        # Schedule next update
+        self.after(500, self.update_background_progress)
+    
+    def _format_time(self, seconds):
+        """Format seconds as m:ss"""
+        seconds = int(seconds)
+        minutes = seconds // 60
+        secs = seconds % 60
+        return f"{minutes}:{secs:02d}"
     
     def download_song(self):
         """Download a song from the entry field"""

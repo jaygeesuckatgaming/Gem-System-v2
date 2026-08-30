@@ -52,6 +52,8 @@ class MusicClient:
         self.background_resume_time = 0.0
         self.bg_channel = None
         self.bg_sound = None
+        self._cached_duration = 0.0
+        self._cached_duration_path = None
 
     def check_connection(self) -> bool:
         """Check if music system is ready"""
@@ -316,6 +318,42 @@ class MusicClient:
             'current': os.path.basename(self.background_song_path) if self.background_song_path else None,
             'paused': self.background_song_paused
         }
+
+    def get_background_position(self) -> float:
+        """Get current playback position in seconds"""
+        try:
+            import pygame
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                return pygame.mixer.music.get_pos() / 1000.0
+        except Exception:
+            pass
+        return 0.0
+
+    def get_background_duration(self) -> float:
+        """Get total duration of the current background song in seconds (cached)"""
+        try:
+            import pygame
+            if self.background_song_path and pygame.mixer.get_init():
+                # Cache the duration to avoid reloading the MP3 every poll
+                if getattr(self, '_cached_duration_path', None) != self.background_song_path:
+                    sound = pygame.mixer.Sound(self.background_song_path)
+                    self._cached_duration = sound.get_length()
+                    self._cached_duration_path = self.background_song_path
+                return self._cached_duration
+        except Exception:
+            pass
+        return 0.0
+
+    def set_background_volume(self, volume: float) -> bool:
+        """Set background music volume (0.0 to 1.0)"""
+        try:
+            import pygame
+            if pygame.mixer.get_init():
+                pygame.mixer.music.set_volume(max(0.0, min(1.0, volume)))
+                return True
+        except Exception as e:
+            print(f"✗ Set volume error: {e}")
+        return False
 
     def get_download_status(self) -> Dict:
         """Get current download status"""

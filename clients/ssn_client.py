@@ -6,6 +6,7 @@ Handles HTTP and WebSocket communication with SSN server
 import httpx
 import websockets
 import json
+import asyncio
 from typing import List, Optional, Callable
 
 
@@ -58,23 +59,28 @@ class SSNClient:
         return success
     
     async def start_websocket_listener(self):
-        """Start WebSocket listener for incoming chat messages"""
+        """Start WebSocket listener for incoming chat messages (with reconnect)"""
         if not self.enabled:
             return
         
-        join_payload = {"join": self.session_id, "out": 0, "in": 1}
+        # Chat messages are broadcast on channel 4 (per SSN API docs)
+        join_payload = {"join": self.session_id, "out": 1, "in": 4}
         
-        try:
-            async with websockets.connect(self.ws_url) as ws:
-                await ws.send(json.dumps(join_payload))
-                print(f"✓ SSN WebSocket connected")
-                
-                async for message in ws:
-                    try:
-                        data = json.loads(message)
-                        if self.on_message:
-                            await self.on_message(data)
-                    except json.JSONDecodeError:
-                        pass
-        except Exception as e:
-            print(f"✗ SSN WebSocket error: {e}")
+        while True:
+            try:
+                async with websockets.connect(self.ws_url) as ws:
+                    await ws.send(json.dumps(join_payload))
+                    print(f"✓ SSN WebSocket connected (listening on channel 4)")
+                    
+                    async for message in ws:
+                        try:
+                            data = json.loads(message)
+                            if self.on_message:
+                                await self.on_message(data)
+                        except json.JSONDecodeError:
+                            pass
+            except Exception as e:
+                print(f"✗ SSN WebSocket error: {e}. Reconnecting in 5s...")
+            
+            # Reconnect after a delay
+            await asyncio.sleep(5)
