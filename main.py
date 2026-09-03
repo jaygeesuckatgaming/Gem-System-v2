@@ -26,7 +26,12 @@ app = cors(app, allow_origin="*")
 llm = LLMClient(model=config.OLLAMA_MODEL, base_url=config.OLLAMA_BASE_URL)
 ssn = SSNClient(api_url=config.SSN_API_URL, session_id=config.SSN_SESSION_ID)
 cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
-tts = TTSClient(tts_url=config.TTS_URL)
+def _tts_url_for_engine():
+    if config.TTS_ENGINE == "pocket":
+        return config.POCKET_TTS_URL
+    return config.TTS_URL
+
+tts = TTSClient(tts_url=_tts_url_for_engine())
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
@@ -95,8 +100,10 @@ def save_config():
 
         # Map of setting name -> (value, is_string)
         settings = {
+            'TTS_ENGINE': (config.TTS_ENGINE, True),
             'TTS_ENABLED': (config.TTS_ENABLED, False),
             'TTS_URL': (config.TTS_URL, True),
+            'POCKET_TTS_URL': (config.POCKET_TTS_URL, True),
             'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
             'TTS_EMBEDDING_SCALE': (config.TTS_EMBEDDING_SCALE, False),
             'TTS_ALPHA': (config.TTS_ALPHA, False),
@@ -652,7 +659,9 @@ async def api_status():
         },
         'tts': {
             'enabled': tts.enabled,
+            'engine': config.TTS_ENGINE,
             'tts_url': config.TTS_URL,
+            'pocket_tts_url': config.POCKET_TTS_URL,
             'diffusion_steps': config.TTS_DIFFUSION_STEPS,
             'embedding_scale': config.TTS_EMBEDDING_SCALE,
             'alpha': config.TTS_ALPHA,
@@ -788,9 +797,19 @@ async def api_update_settings():
         config.SSN_TARGETS = data['ssn_targets']
     if 'tts_enabled' in data:
         config.TTS_ENABLED = data['tts_enabled']
+    if 'tts_engine' in data:
+        config.TTS_ENGINE = data['tts_engine']
+        tts.tts_url = _tts_url_for_engine()
+        # Re-check connection against the new engine's URL
+        await tts.check_connection()
     if 'tts_url' in data:
         config.TTS_URL = data['tts_url']
-        tts.tts_url = data['tts_url']
+        if config.TTS_ENGINE != "pocket":
+            tts.tts_url = data['tts_url']
+    if 'pocket_tts_url' in data:
+        config.POCKET_TTS_URL = data['pocket_tts_url']
+        if config.TTS_ENGINE == "pocket":
+            tts.tts_url = data['pocket_tts_url']
     if 'tts_diffusion_steps' in data:
         config.TTS_DIFFUSION_STEPS = data['tts_diffusion_steps']
     if 'tts_embedding_scale' in data:

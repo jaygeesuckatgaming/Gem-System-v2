@@ -298,17 +298,35 @@ class ControlPanel(ctk.CTk):
     
     # ==================== TTS TAB ====================
     def build_tts_tab(self):
-        """Build the TTS tab with StyleTTS2 settings"""
-        title = ctk.CTkLabel(self.tts_tab, text="Text-to-Speech (StyleTTS2)", font=ctk.CTkFont(size=20, weight="bold"))
+        """Build the TTS tab with engine selection and settings"""
+        title = ctk.CTkLabel(self.tts_tab, text="Text-to-Speech", font=ctk.CTkFont(size=20, weight="bold"))
         title.pack(pady=10)
         
         # Connection status
         self.tts_status = ctk.CTkLabel(self.tts_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
         self.tts_status.pack(anchor="w", padx=20, pady=5)
         
-        # Start StyleTTS2 button
-        start_styletts_btn = ctk.CTkButton(self.tts_tab, text="Start StyleTTS2 Server", command=self.start_styletts2)
-        start_styletts_btn.pack(anchor="w", padx=20, pady=10)
+        # TTS Engine selection (radio buttons)
+        engine_label = ctk.CTkLabel(self.tts_tab, text="TTS Engine:", font=ctk.CTkFont(size=14, weight="bold"))
+        engine_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.tts_engine_var = ctk.StringVar(value="styletts2")
+        engine_frame = ctk.CTkFrame(self.tts_tab)
+        engine_frame.pack(fill="x", padx=20, pady=5)
+        
+        styletts_radio = ctk.CTkRadioButton(engine_frame, text="StyleTTS2", variable=self.tts_engine_var, value="styletts2", command=self.on_engine_change)
+        styletts_radio.pack(side="left", padx=10, pady=10)
+        
+        pocket_radio = ctk.CTkRadioButton(engine_frame, text="Pocket TTS", variable=self.tts_engine_var, value="pocket", command=self.on_engine_change)
+        pocket_radio.pack(side="left", padx=10, pady=10)
+        
+        # Start server buttons
+        start_frame = ctk.CTkFrame(self.tts_tab)
+        start_frame.pack(fill="x", padx=20, pady=5)
+        start_styletts_btn = ctk.CTkButton(start_frame, text="Start StyleTTS2", command=self.start_styletts2)
+        start_styletts_btn.pack(side="left", padx=10, pady=10)
+        start_pocket_btn = ctk.CTkButton(start_frame, text="Start Pocket TTS", command=self.start_pockettts)
+        start_pocket_btn.pack(side="left", padx=10, pady=10)
         
         # Enable toggle
         self.tts_enabled_var = ctk.BooleanVar(value=False)
@@ -321,11 +339,32 @@ class ControlPanel(ctk.CTk):
         audio_check.pack(anchor="w", padx=20, pady=10)
         
         # TTS URL
-        url_label = ctk.CTkLabel(self.tts_tab, text="TTS Server URL:", font=ctk.CTkFont(size=14))
+        url_label = ctk.CTkLabel(self.tts_tab, text="StyleTTS2 URL:", font=ctk.CTkFont(size=14))
         url_label.pack(anchor="w", padx=20, pady=(10, 0))
         
         self.tts_url_entry = ctk.CTkEntry(self.tts_tab)
         self.tts_url_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Pocket TTS URL
+        pocket_url_label = ctk.CTkLabel(self.tts_tab, text="Pocket TTS URL:", font=ctk.CTkFont(size=14))
+        pocket_url_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.pocket_tts_url_entry = ctk.CTkEntry(self.tts_tab)
+        self.pocket_tts_url_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Pocket TTS device selection
+        pocket_device_label = ctk.CTkLabel(self.tts_tab, text="Pocket TTS Device:", font=ctk.CTkFont(size=14))
+        pocket_device_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.pocket_device_var = ctk.StringVar(value="cpu")
+        pocket_device_frame = ctk.CTkFrame(self.tts_tab)
+        pocket_device_frame.pack(fill="x", padx=20, pady=5)
+        
+        cpu_radio = ctk.CTkRadioButton(pocket_device_frame, text="CPU", variable=self.pocket_device_var, value="cpu", command=self.save_pocket_device)
+        cpu_radio.pack(side="left", padx=10, pady=10)
+        
+        gpu_radio = ctk.CTkRadioButton(pocket_device_frame, text="GPU (CUDA)", variable=self.pocket_device_var, value="cuda", command=self.save_pocket_device)
+        gpu_radio.pack(side="left", padx=10, pady=10)
         
         # Save button (top, always visible)
         save_btn = ctk.CTkButton(self.tts_tab, text="Save TTS Settings", command=self.save_tts_settings)
@@ -2182,6 +2221,34 @@ class ControlPanel(ctk.CTk):
         if self._launch_detached(bat_path):
             print("✓ Started StyleTTS2 Server")
     
+    def start_pockettts(self):
+        """Launch the Pocket TTS server"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_pockettts.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started Pocket TTS Server")
+    
+    def save_pocket_device(self):
+        """Save Pocket TTS device selection to settings.ini"""
+        try:
+            import configparser
+            settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts", "pocket-tts", "settings.ini")
+            cfg = configparser.ConfigParser()
+            cfg.read(settings_path)
+            if not cfg.has_section('TTS'):
+                cfg.add_section('TTS')
+            cfg.set('TTS', 'device', self.pocket_device_var.get())
+            with open(settings_path, 'w') as f:
+                cfg.write(f)
+            print(f"✓ Pocket TTS device set to: {self.pocket_device_var.get()}")
+        except Exception as e:
+            print(f"Failed to save Pocket TTS device: {e}")
+    
+    def on_engine_change(self):
+        """Handle TTS engine radio button change"""
+        engine = self.tts_engine_var.get()
+        print(f"TTS engine changed to: {engine}")
+        self.save_tts_settings()
+    
     def load_tts_settings(self):
         """Load current TTS settings from server"""
         try:
@@ -2192,6 +2259,22 @@ class ControlPanel(ctk.CTk):
                 
                 self.tts_url_entry.delete(0, "end")
                 self.tts_url_entry.insert(0, tts.get('tts_url', ''))
+                
+                self.pocket_tts_url_entry.delete(0, "end")
+                self.pocket_tts_url_entry.insert(0, tts.get('pocket_tts_url', 'http://127.0.0.1:13301/tts'))
+                
+                self.tts_engine_var.set(tts.get('engine', 'styletts2'))
+                
+                # Load Pocket TTS device from settings.ini
+                try:
+                    import configparser
+                    settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts", "pocket-tts", "settings.ini")
+                    cfg = configparser.ConfigParser()
+                    cfg.read(settings_path)
+                    device = cfg.get('TTS', 'device', fallback='cpu')
+                    self.pocket_device_var.set(device)
+                except Exception:
+                    self.pocket_device_var.set('cpu')
                 
                 self.tts_enabled_var.set(tts.get('enabled', False))
                 
@@ -2220,7 +2303,9 @@ class ControlPanel(ctk.CTk):
         try:
             payload = {
                 'tts_enabled': self.tts_enabled_var.get(),
+                'tts_engine': self.tts_engine_var.get(),
                 'tts_url': self.tts_url_entry.get().strip(),
+                'pocket_tts_url': self.pocket_tts_url_entry.get().strip(),
                 'tts_diffusion_steps': int(self.diffusion_steps_slider.get()),
                 'tts_embedding_scale': round(self.embedding_scale_slider.get(), 1),
                 'tts_alpha': round(self.alpha_slider.get(), 2),
@@ -2235,23 +2320,24 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to save TTS settings: {e}")
         
-        # Also save StyleTTS2 parameters to StyleTTS2 server (if running)
-        try:
-            tts_url = self.tts_url_entry.get().strip()
-            base_url = tts_url.replace('/tts', '')
-            payload = {
-                'diffusion_steps': int(self.diffusion_steps_slider.get()),
-                'embedding_scale': round(self.embedding_scale_slider.get(), 1),
-                'alpha': round(self.alpha_slider.get(), 2),
-                'beta': round(self.beta_slider.get(), 2),
-                'reference_voice': self.reference_voice_entry.get().strip()
-            }
-            
-            response = httpx.post(f"{base_url}/settings", json=payload, timeout=5)
-            if response.status_code == 200:
-                print("✓ StyleTTS2 parameters saved")
-        except Exception as e:
-            print(f"StyleTTS2 server not running, params saved to main config only: {e}")
+        # Also save StyleTTS2 parameters to StyleTTS2 server (only when StyleTTS2 is active)
+        if self.tts_engine_var.get() == "styletts2":
+            try:
+                tts_url = self.tts_url_entry.get().strip()
+                base_url = tts_url.replace('/tts', '')
+                payload = {
+                    'diffusion_steps': int(self.diffusion_steps_slider.get()),
+                    'embedding_scale': round(self.embedding_scale_slider.get(), 1),
+                    'alpha': round(self.alpha_slider.get(), 2),
+                    'beta': round(self.beta_slider.get(), 2),
+                    'reference_voice': self.reference_voice_entry.get().strip()
+                }
+                
+                response = httpx.post(f"{base_url}/settings", json=payload, timeout=5)
+                if response.status_code == 200:
+                    print("✓ StyleTTS2 parameters saved")
+            except Exception as e:
+                print(f"StyleTTS2 server not running, params saved to main config only: {e}")
     
     def test_tts(self):
         """Test TTS with entered text"""

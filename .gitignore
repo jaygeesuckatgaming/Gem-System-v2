@@ -12,6 +12,10 @@ settings.json
 cookies.txt
 known_speakers.json
 
+# Test scripts
+test_ollama.py
+test_ssn_relay.py
+
 # Cognee data (large, generated)
 cognee_data/
 cognee_system/
@@ -22,6 +26,9 @@ tts_output/
 
 # StyleTTS2 (separate git repo)
 tts/StyleTTS2/
+
+# Pocket TTS (separate git repo)
+tts/pocket-tts/
 
 # Reference voice audio files (large binaries)
 tts/reference_voices/*.wav

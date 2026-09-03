@@ -1,6 +1,6 @@
 """
-StyleTTS2 Client
-Communicates with StyleTTS2 server on port 13300
+TTS Client
+Communicates with the active TTS server (StyleTTS2 on 13300 or Pocket TTS on 13301)
 """
 
 import httpx
@@ -14,7 +14,7 @@ class TTSClient:
         self.enabled = False
 
     async def check_connection(self) -> bool:
-        """Check if StyleTTS2 server is running"""
+        """Check if the TTS server is running"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(self.tts_url.replace('/tts', '/'))
@@ -27,7 +27,7 @@ class TTSClient:
         return False
 
     async def speak(self, text: str) -> bool:
-        """Send text to StyleTTS2 for synthesis"""
+        """Send text to the TTS server for synthesis"""
         if not self.enabled:
             return False
 
@@ -40,7 +40,7 @@ class TTSClient:
         try:
             payload = {"chatmessage": clean_text}
             print(f"TTS: Synthesizing '{clean_text[:60]}...'")
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.tts_url, json=payload)
                 if response.status_code == 200:
                     print(f"✓ TTS complete")
