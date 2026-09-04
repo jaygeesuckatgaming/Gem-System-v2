@@ -85,7 +85,7 @@ Additional steps for styletts2
 
 you need to install espeak [http://sourceforge.net/projects/espeak/files/espeak/espeak-1.48/setup_espeak-1.48.04.exe](http://sourceforge.net/projects/espeak/files/espeak/espeak-1.48/setup_espeak-1.48.04.exe)
 
-![After installing espeak you have to edit your enviroment settings]([https://ibb.co/q3PHhwV3](https://i.ibb.co/JwMY8Pgw/2026-09-04-185542.png))
+![After installing espeak you have to edit your enviroment settings]([https://ibb.co/q3PHhwV3](https://i.ibb.co/JwMY8Pgw/2026-09-04-185542.png)
 
   
 
