@@ -1,3 +1,5 @@
+<div align="center">
+
 # Gem-System-v2
 
 **Windows Installation:**
@@ -220,4 +222,5 @@ Gem-System-v2/
 -   **Runtime state files** (background_state.json, now_playing_state.txt) are gitignored.
     
 -   **Large binaries** (downloaded music, TTS output, reference voices) are gitignored.
-v
+
+</div>
