@@ -36,6 +36,12 @@ music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 
+# Record downloaded songs to memory so Gem remembers them
+def _on_download_complete(query: str):
+    asyncio.create_task(cognee.remember("Gem", f"Gem downloaded the song: {query}"))
+
+music.on_download_complete = _on_download_complete
+
 # Audio player (plays TTS output when not using Neurosync)
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
 audio_player = AudioPlayer(watch_path=_tts_output_path, device_name=config.AUDIO_OUTPUT_DEVICE or None)
@@ -256,6 +262,50 @@ def is_vision_command(text: str) -> bool:
     return False
 
 
+def is_stop_music_command(text: str) -> bool:
+    """Check if a message is a stop-music command."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "stop the music",
+        "stop music",
+        "stop the song",
+        "stop playing",
+        "stop the song playing",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
+def is_resume_background_command(text: str) -> bool:
+    """Check if a message is a resume-background-music command."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "resume the background music",
+        "resume background music",
+        "resume the background song",
+        "resume background song",
+        "play the background music",
+        "play background music",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
+def is_list_songs_command(text: str) -> bool:
+    """Check if a message is asking to list downloaded songs."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "what songs have you downloaded",
+        "what songs did you download",
+        "list your songs",
+        "list the songs",
+        "list downloaded songs",
+        "what songs do you have",
+        "what songs are downloaded",
+        "songs you have downloaded",
+        "songs you downloaded",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
 def translate_emotes(text: str) -> str:
     """Translate chat emotes into their meanings so the LLM understands them.
     Returns the original text with emote meanings appended in brackets.
@@ -466,8 +516,50 @@ async def handle_incoming_message(data: dict):
                 return
             # 'allowed' or 'not_found' -> proceed with download
         
+        # Check if the song already exists locally before downloading
+        existing = music.check_song_exists(song_name)
+        if existing:
+            music.play_mp3(existing)
+            await ssn.send_message(f"🎵 Already have '{existing}' - playing it now!", targets=config.SSN_TARGETS)
+            return
+        
         music.download_song(song_name)
         await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for stop music command (intercept before LLM)
+    if is_stop_music_command(message):
+        print(f"🛑 Stop music command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        if music.now_playing:
+            was_playing = music.now_playing
+            music.stop_music()
+            await cognee.remember("Gem", f"Gem stopped the music (was playing {was_playing})")
+            await ssn.send_message("🛑 Stopped the music.", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message("Nothing's playing right now.", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for resume background music command (intercept before LLM)
+    if is_resume_background_command(message):
+        print(f"▶️ Resume background music command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        if music.restart_background_song():
+            await ssn.send_message("▶️ Background music is back on.", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message("I don't have a background song set.", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for list downloaded songs command (intercept before LLM)
+    if is_list_songs_command(message):
+        print(f"📋 List songs command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        songs = music.list_downloaded_songs()
+        if songs:
+            song_list = ", ".join(songs)
+            await ssn.send_message(f"🎵 I have these songs downloaded: {song_list}", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message("I don't have any songs downloaded yet.", targets=config.SSN_TARGETS)
         return
     
     # Check for custom OSC action (intercept before LLM)
@@ -1249,6 +1341,9 @@ async def startup():
     # Check music system
     music.check_connection()
     
+    # Resume background music from saved state (if any)
+    music.resume_background_from_state()
+    
     # Check TTS connection (if enabled)
     if config.TTS_ENABLED:
         await tts.check_connection()
@@ -1266,6 +1361,13 @@ async def startup():
     
     # Start background tasks
     await start_background_tasks()
+
+
+@app.after_serving
+async def shutdown():
+    """Save state on server shutdown"""
+    print("Shutting down Gem-System v2...")
+    music.save_background_state()
 
 
 if __name__ == '__main__':

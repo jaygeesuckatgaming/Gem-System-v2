@@ -57,6 +57,7 @@ class ControlPanel(ctk.CTk):
         self.opencode_tab = self.tabview.add("OpenCode")
         self.vision_tab = self.tabview.add("Vision")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
+        self.extras_tab = self.tabview.add("Extras")
         
         self.build_status_tab()
         self.build_llm_tab()
@@ -69,6 +70,7 @@ class ControlPanel(ctk.CTk):
         self.build_opencode_tab()
         self.build_vision_tab()
         self.build_ssn_tab()
+        self.build_extras_tab()
         
         # Start status polling
         self.polling = True
@@ -2356,6 +2358,72 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"TTS test failed: {e}")
     
+    # ==================== EXTRAS TAB ====================
+    def build_extras_tab(self):
+        """Build the Extras tab with miscellaneous tools"""
+        title = ctk.CTkLabel(self.extras_tab, text="Extras", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+
+        # --- Hardware Monitor ---
+        hw_frame = ctk.CTkFrame(self.extras_tab)
+        hw_frame.pack(fill="x", padx=20, pady=10)
+
+        hw_label = ctk.CTkLabel(hw_frame, text="Hardware Monitor", font=ctk.CTkFont(size=16, weight="bold"))
+        hw_label.pack(anchor="w", padx=20, pady=(15, 5))
+
+        hw_desc = ctk.CTkLabel(
+            hw_frame,
+            text="Real-time GPU VRAM, CPU, and system RAM usage graphs.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        hw_desc.pack(anchor="w", padx=20, pady=(0, 10))
+
+        hw_btn = ctk.CTkButton(hw_frame, text="Open Hardware Monitor", command=self.open_hardware_monitor)
+        hw_btn.pack(anchor="w", padx=20, pady=(0, 15))
+
+        # --- Now Playing Overlay ---
+        np_frame = ctk.CTkFrame(self.extras_tab)
+        np_frame.pack(fill="x", padx=20, pady=10)
+
+        np_label = ctk.CTkLabel(np_frame, text="Now Playing Overlay", font=ctk.CTkFont(size=16, weight="bold"))
+        np_label.pack(anchor="w", padx=20, pady=(15, 5))
+
+        np_desc = ctk.CTkLabel(
+            np_frame,
+            text="Always-on-top overlay showing the current song (for OBS capture).",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        np_desc.pack(anchor="w", padx=20, pady=(0, 10))
+
+        np_btn = ctk.CTkButton(np_frame, text="Open Now Playing Overlay", command=self.open_now_playing_overlay)
+        np_btn.pack(anchor="w", padx=20, pady=(0, 15))
+
+    def open_hardware_monitor(self):
+        """Launch the hardware monitor in a separate window"""
+        try:
+            import tkinter as tk
+            from extras.gpu_viz import HardwareMonitorApp
+
+            monitor_root = tk.Tk()
+            HardwareMonitorApp(monitor_root)
+            monitor_root.mainloop()
+        except Exception as e:
+            print(f"Failed to open hardware monitor: {e}")
+
+    def open_now_playing_overlay(self):
+        """Launch the now playing overlay in a separate window"""
+        try:
+            from extras.now_playing import NowPlayingOverlay
+
+            overlay = NowPlayingOverlay()
+            overlay.bind("<ButtonPress-1>", overlay.start_drag)
+            overlay.bind("<B1-Motion>", overlay.do_drag)
+            overlay.mainloop()
+        except Exception as e:
+            print(f"Failed to open now playing overlay: {e}")
+
     def on_close(self):
         """Clean up on window close"""
         self.polling = False
