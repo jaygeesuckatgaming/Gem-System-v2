@@ -5,7 +5,7 @@
 **Windows Installation:**
 
 **Pre requirements**
-
+</div>
 **For sound routing install [Voicemeter Banana](https://vb-audio.com/Voicemeeter/banana.htm)**
 
 **For chat routing install [Social Stream Ninja](https://github.com/steveseguin/social_stream/releases)**
@@ -223,4 +223,3 @@ Gem-System-v2/
     
 -   **Large binaries** (downloaded music, TTS output, reference voices) are gitignored.
 
-</div>
