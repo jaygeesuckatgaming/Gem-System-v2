@@ -46,6 +46,10 @@ yt-dlp.exe
 Neurosync/NeuroSync_Local_API/
 Neurosync/NeuroSync_Player/
 
+# Runtime state files
+background_state.json
+now_playing_state.txt
+
 # OS
 .DS_Store
 Thumbs.db
