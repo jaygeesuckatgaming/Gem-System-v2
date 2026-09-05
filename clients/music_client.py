@@ -37,6 +37,9 @@ class MusicClient:
         # Background songs folder
         self.background_folder = os.path.join(MUSIC_DIR, "background_songs")
 
+        # Playlist folder (all MP3s played sequentially)
+        self.playlist_folder = os.path.join(MUSIC_DIR, "playlist")
+
         self.device_name = device_name
         self.queue: List[str] = []
         self.current_download: Optional[str] = None
@@ -440,6 +443,73 @@ class MusicClient:
             'current': os.path.basename(self.background_song_path) if self.background_song_path else None,
             'paused': self.background_song_paused
         }
+
+    # ==================== PLAYLIST (play all MP3s in a folder) ====================
+    def list_playlist_songs(self) -> List[str]:
+        """List all MP3s in the playlist folder."""
+        if not os.path.isdir(self.playlist_folder):
+            return []
+        return sorted([f for f in os.listdir(self.playlist_folder) if f.lower().endswith('.mp3')])
+
+    def play_playlist(self) -> bool:
+        """Play all MP3s in the playlist folder sequentially (looping)."""
+        songs = self.list_playlist_songs()
+        if not songs:
+            print(f"⚠️ No MP3s found in playlist folder: {self.playlist_folder}")
+            return False
+
+        print(f"🎵 Starting playlist ({len(songs)} songs)")
+        thread = threading.Thread(target=self._play_playlist_loop, args=(songs,), daemon=True)
+        thread.start()
+        return True
+
+    def _play_playlist_loop(self, songs: List[str]):
+        """Play each song in the playlist sequentially, then loop."""
+        try:
+            import pygame
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+
+            while True:
+                for song in songs:
+                    if self._stop_requested:
+                        self._stop_requested = False
+                        return
+                    filepath = os.path.join(self.playlist_folder, song)
+                    self.now_playing = song
+                    self._write_state_file(song)
+                    pygame.mixer.music.load(filepath)
+                    pygame.mixer.music.play()
+                    pygame.mixer.music.set_volume(self.background_volume)
+                    print(f"🎵 Playlist now playing: {song}")
+                    while pygame.mixer.music.get_busy():
+                        if self._stop_requested:
+                            pygame.mixer.music.stop()
+                            self._stop_requested = False
+                            self.now_playing = None
+                            self._write_state_file(None)
+                            return
+                        time.sleep(0.1)
+                # Loop back to the start
+        except Exception as e:
+            print(f"✗ Playlist playback error: {e}")
+        finally:
+            self.now_playing = None
+            self._write_state_file(None)
+
+    def stop_playlist(self) -> bool:
+        """Stop the playlist playback."""
+        self._stop_requested = True
+        try:
+            import pygame
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+        except Exception:
+            pass
+        self.now_playing = None
+        self._write_state_file(None)
+        print("🎵 Playlist stopped")
+        return True
 
     def get_background_position(self) -> float:
         """Get current playback position in seconds"""

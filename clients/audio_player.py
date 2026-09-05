@@ -179,6 +179,25 @@ class AudioPlayer:
         self._thread = threading.Thread(target=self._watch_loop, daemon=True)
         self._thread.start()
 
+    def stop_playback(self):
+        """Immediately stop the currently playing TTS audio (for interruption)."""
+        try:
+            pygame.mixer.stop()
+        except Exception:
+            pass
+        try:
+            if os.path.exists(self.watch_path):
+                self._delete_file(self.watch_path)
+        except Exception:
+            pass
+
+    def is_playing(self) -> bool:
+        """Return True if TTS audio is currently playing."""
+        try:
+            return bool(pygame.mixer.get_busy())
+        except Exception:
+            return False
+
     def stop(self):
         """Stop the audio player"""
         self._stop_event.set()

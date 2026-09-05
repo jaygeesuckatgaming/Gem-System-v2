@@ -40,6 +40,7 @@ music/requests/*.webm
 music/requests/*.mkv
 music/requests/karaoke/*.wav
 music/background_songs/*.mp3
+music/playlist/*.mp3
 yt-dlp.exe
 
 # Neurosync (separate git repos)

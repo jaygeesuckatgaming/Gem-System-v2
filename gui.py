@@ -58,6 +58,7 @@ class ControlPanel(ctk.CTk):
         self.vision_tab = self.tabview.add("Vision")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         self.extras_tab = self.tabview.add("Extras")
+        self.idle_tab = self.tabview.add("Idle Actions")
         
         self.build_status_tab()
         self.build_llm_tab()
@@ -71,6 +72,7 @@ class ControlPanel(ctk.CTk):
         self.build_vision_tab()
         self.build_ssn_tab()
         self.build_extras_tab()
+        self.build_idle_tab()
         
         # Start status polling
         self.polling = True
@@ -301,19 +303,23 @@ class ControlPanel(ctk.CTk):
     # ==================== TTS TAB ====================
     def build_tts_tab(self):
         """Build the TTS tab with engine selection and settings"""
-        title = ctk.CTkLabel(self.tts_tab, text="Text-to-Speech", font=ctk.CTkFont(size=20, weight="bold"))
+        # Single scrollable container so nothing gets cut off in small windows
+        scroll = ctk.CTkScrollableFrame(self.tts_tab)
+        scroll.pack(fill="both", expand=True, padx=5, pady=5)
+
+        title = ctk.CTkLabel(scroll, text="Text-to-Speech", font=ctk.CTkFont(size=20, weight="bold"))
         title.pack(pady=10)
         
         # Connection status
-        self.tts_status = ctk.CTkLabel(self.tts_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.tts_status = ctk.CTkLabel(scroll, text="Status: Checking...", font=ctk.CTkFont(size=16))
         self.tts_status.pack(anchor="w", padx=20, pady=5)
         
         # TTS Engine selection (radio buttons)
-        engine_label = ctk.CTkLabel(self.tts_tab, text="TTS Engine:", font=ctk.CTkFont(size=14, weight="bold"))
+        engine_label = ctk.CTkLabel(scroll, text="TTS Engine:", font=ctk.CTkFont(size=14, weight="bold"))
         engine_label.pack(anchor="w", padx=20, pady=(10, 0))
         
         self.tts_engine_var = ctk.StringVar(value="styletts2")
-        engine_frame = ctk.CTkFrame(self.tts_tab)
+        engine_frame = ctk.CTkFrame(scroll)
         engine_frame.pack(fill="x", padx=20, pady=5)
         
         styletts_radio = ctk.CTkRadioButton(engine_frame, text="StyleTTS2", variable=self.tts_engine_var, value="styletts2", command=self.on_engine_change)
@@ -323,7 +329,7 @@ class ControlPanel(ctk.CTk):
         pocket_radio.pack(side="left", padx=10, pady=10)
         
         # Start server buttons
-        start_frame = ctk.CTkFrame(self.tts_tab)
+        start_frame = ctk.CTkFrame(scroll)
         start_frame.pack(fill="x", padx=20, pady=5)
         start_styletts_btn = ctk.CTkButton(start_frame, text="Start StyleTTS2", command=self.start_styletts2)
         start_styletts_btn.pack(side="left", padx=10, pady=10)
@@ -332,34 +338,39 @@ class ControlPanel(ctk.CTk):
         
         # Enable toggle
         self.tts_enabled_var = ctk.BooleanVar(value=False)
-        enable_check = ctk.CTkCheckBox(self.tts_tab, text="Enable TTS", variable=self.tts_enabled_var)
+        enable_check = ctk.CTkCheckBox(scroll, text="Enable TTS", variable=self.tts_enabled_var)
         enable_check.pack(anchor="w", padx=20, pady=10)
+        
+        # Send responses to chat toggle
+        self.send_to_chat_var = ctk.BooleanVar(value=True)
+        send_chat_check = ctk.CTkCheckBox(scroll, text="Send responses to chat (disable for TTS-only)", variable=self.send_to_chat_var)
+        send_chat_check.pack(anchor="w", padx=20, pady=10)
         
         # Audio player toggle (plays TTS output when not using Neurosync)
         self.audio_player_var = ctk.BooleanVar(value=True)
-        audio_check = ctk.CTkCheckBox(self.tts_tab, text="Enable Audio Player (disable when using Neurosync)", variable=self.audio_player_var)
+        audio_check = ctk.CTkCheckBox(scroll, text="Enable Audio Player (disable when using Neurosync)", variable=self.audio_player_var)
         audio_check.pack(anchor="w", padx=20, pady=10)
         
         # TTS URL
-        url_label = ctk.CTkLabel(self.tts_tab, text="StyleTTS2 URL:", font=ctk.CTkFont(size=14))
+        url_label = ctk.CTkLabel(scroll, text="StyleTTS2 URL:", font=ctk.CTkFont(size=14))
         url_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        self.tts_url_entry = ctk.CTkEntry(self.tts_tab)
+        self.tts_url_entry = ctk.CTkEntry(scroll)
         self.tts_url_entry.pack(fill="x", padx=20, pady=10)
         
         # Pocket TTS URL
-        pocket_url_label = ctk.CTkLabel(self.tts_tab, text="Pocket TTS URL:", font=ctk.CTkFont(size=14))
+        pocket_url_label = ctk.CTkLabel(scroll, text="Pocket TTS URL:", font=ctk.CTkFont(size=14))
         pocket_url_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        self.pocket_tts_url_entry = ctk.CTkEntry(self.tts_tab)
+        self.pocket_tts_url_entry = ctk.CTkEntry(scroll)
         self.pocket_tts_url_entry.pack(fill="x", padx=20, pady=10)
         
         # Pocket TTS device selection
-        pocket_device_label = ctk.CTkLabel(self.tts_tab, text="Pocket TTS Device:", font=ctk.CTkFont(size=14))
+        pocket_device_label = ctk.CTkLabel(scroll, text="Pocket TTS Device:", font=ctk.CTkFont(size=14))
         pocket_device_label.pack(anchor="w", padx=20, pady=(10, 0))
         
         self.pocket_device_var = ctk.StringVar(value="cpu")
-        pocket_device_frame = ctk.CTkFrame(self.tts_tab)
+        pocket_device_frame = ctk.CTkFrame(scroll)
         pocket_device_frame.pack(fill="x", padx=20, pady=5)
         
         cpu_radio = ctk.CTkRadioButton(pocket_device_frame, text="CPU", variable=self.pocket_device_var, value="cpu", command=self.save_pocket_device)
@@ -369,60 +380,65 @@ class ControlPanel(ctk.CTk):
         gpu_radio.pack(side="left", padx=10, pady=10)
         
         # Save button (top, always visible)
-        save_btn = ctk.CTkButton(self.tts_tab, text="Save TTS Settings", command=self.save_tts_settings)
+        save_btn = ctk.CTkButton(scroll, text="Save TTS Settings", command=self.save_tts_settings)
         save_btn.pack(pady=10)
         
-        # Scrollable frame for StyleTTS2 parameters
-        params_frame = ctk.CTkScrollableFrame(self.tts_tab, height=400)
-        params_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
         # StyleTTS2 parameters section
-        params_label = ctk.CTkLabel(params_frame, text="StyleTTS2 Parameters", font=ctk.CTkFont(size=16, weight="bold"))
-        params_label.pack(anchor="w", pady=(5, 10))
+        params_label = ctk.CTkLabel(scroll, text="StyleTTS2 Parameters", font=ctk.CTkFont(size=16, weight="bold"))
+        params_label.pack(anchor="w", padx=20, pady=(5, 10))
         
         # Diffusion steps
-        diff_label = ctk.CTkLabel(params_frame, text="Diffusion Steps:", font=ctk.CTkFont(size=13))
-        diff_label.pack(anchor="w")
-        self.diffusion_steps_slider = ctk.CTkSlider(params_frame, from_=5, to=50, number_of_steps=45, command=self.update_diffusion_label)
-        self.diffusion_steps_slider.pack(fill="x", pady=(0, 5))
-        self.diffusion_value_label = ctk.CTkLabel(params_frame, text="20", font=ctk.CTkFont(size=12))
-        self.diffusion_value_label.pack(anchor="e")
+        diff_label = ctk.CTkLabel(scroll, text="Diffusion Steps:", font=ctk.CTkFont(size=13))
+        diff_label.pack(anchor="w", padx=20)
+        self.diffusion_steps_slider = ctk.CTkSlider(scroll, from_=5, to=50, number_of_steps=45, command=self.update_diffusion_label)
+        self.diffusion_steps_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.diffusion_value_label = ctk.CTkLabel(scroll, text="20", font=ctk.CTkFont(size=12))
+        self.diffusion_value_label.pack(anchor="e", padx=20)
+
+        # GPU usage hint
+        diff_hint = ctk.CTkLabel(
+            scroll,
+            text="Lower diffusion steps (20 → 5-10) to use less GPU power. This is the biggest lever.",
+            font=ctk.CTkFont(size=11),
+            text_color="gray"
+        )
+        diff_hint.pack(anchor="w", padx=20, pady=(0, 10))
         
         # Embedding scale
-        emb_label = ctk.CTkLabel(params_frame, text="Embedding Scale:", font=ctk.CTkFont(size=13))
-        emb_label.pack(anchor="w", pady=(10, 0))
-        self.embedding_scale_slider = ctk.CTkSlider(params_frame, from_=0.5, to=1.5, number_of_steps=20, command=self.update_embedding_label)
-        self.embedding_scale_slider.pack(fill="x", pady=(0, 5))
-        self.embedding_value_label = ctk.CTkLabel(params_frame, text="1.0", font=ctk.CTkFont(size=12))
-        self.embedding_value_label.pack(anchor="e")
+        emb_label = ctk.CTkLabel(scroll, text="Embedding Scale:", font=ctk.CTkFont(size=13))
+        emb_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.embedding_scale_slider = ctk.CTkSlider(scroll, from_=0.5, to=1.5, number_of_steps=20, command=self.update_embedding_label)
+        self.embedding_scale_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.embedding_value_label = ctk.CTkLabel(scroll, text="1.0", font=ctk.CTkFont(size=12))
+        self.embedding_value_label.pack(anchor="e", padx=20)
         
         # Alpha
-        alpha_label = ctk.CTkLabel(params_frame, text="Alpha (speed):", font=ctk.CTkFont(size=13))
-        alpha_label.pack(anchor="w", pady=(10, 0))
-        self.alpha_slider = ctk.CTkSlider(params_frame, from_=0.0, to=1.0, number_of_steps=20, command=self.update_alpha_label)
-        self.alpha_slider.pack(fill="x", pady=(0, 5))
-        self.alpha_value_label = ctk.CTkLabel(params_frame, text="0.3", font=ctk.CTkFont(size=12))
-        self.alpha_value_label.pack(anchor="e")
+        alpha_label = ctk.CTkLabel(scroll, text="Alpha (speed):", font=ctk.CTkFont(size=13))
+        alpha_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.alpha_slider = ctk.CTkSlider(scroll, from_=0.0, to=1.0, number_of_steps=20, command=self.update_alpha_label)
+        self.alpha_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.alpha_value_label = ctk.CTkLabel(scroll, text="0.3", font=ctk.CTkFont(size=12))
+        self.alpha_value_label.pack(anchor="e", padx=20)
         
         # Beta
-        beta_label = ctk.CTkLabel(params_frame, text="Beta (emotion):", font=ctk.CTkFont(size=13))
-        beta_label.pack(anchor="w", pady=(10, 0))
-        self.beta_slider = ctk.CTkSlider(params_frame, from_=0.0, to=1.0, number_of_steps=20, command=self.update_beta_label)
-        self.beta_slider.pack(fill="x", pady=(0, 5))
-        self.beta_value_label = ctk.CTkLabel(params_frame, text="0.7", font=ctk.CTkFont(size=12))
-        self.beta_value_label.pack(anchor="e")
+        beta_label = ctk.CTkLabel(scroll, text="Beta (emotion):", font=ctk.CTkFont(size=13))
+        beta_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.beta_slider = ctk.CTkSlider(scroll, from_=0.0, to=1.0, number_of_steps=20, command=self.update_beta_label)
+        self.beta_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.beta_value_label = ctk.CTkLabel(scroll, text="0.7", font=ctk.CTkFont(size=12))
+        self.beta_value_label.pack(anchor="e", padx=20)
         
         # Reference voice
-        voice_label = ctk.CTkLabel(params_frame, text="Reference Voice:", font=ctk.CTkFont(size=13))
-        voice_label.pack(anchor="w", pady=(10, 0))
-        self.reference_voice_entry = ctk.CTkEntry(params_frame)
-        self.reference_voice_entry.pack(fill="x", pady=(0, 10))
+        voice_label = ctk.CTkLabel(scroll, text="Reference Voice:", font=ctk.CTkFont(size=13))
+        voice_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.reference_voice_entry = ctk.CTkEntry(scroll)
+        self.reference_voice_entry.pack(fill="x", padx=20, pady=(0, 10))
         
         # Test TTS section
-        test_label = ctk.CTkLabel(self.tts_tab, text="Test TTS:", font=ctk.CTkFont(size=14))
+        test_label = ctk.CTkLabel(scroll, text="Test TTS:", font=ctk.CTkFont(size=14))
         test_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        test_frame = ctk.CTkFrame(self.tts_tab)
+        test_frame = ctk.CTkFrame(scroll)
         test_frame.pack(fill="x", padx=20, pady=10)
         
         self.tts_test_entry = ctk.CTkEntry(test_frame, placeholder_text="Enter text to speak")
@@ -2297,6 +2313,8 @@ class ControlPanel(ctk.CTk):
                 
                 self.reference_voice_entry.delete(0, "end")
                 self.reference_voice_entry.insert(0, tts.get('reference_voice', ''))
+
+                self.send_to_chat_var.set(tts.get('send_responses_to_chat', True))
         except Exception as e:
             print(f"Failed to load TTS settings: {e}")
     
@@ -2313,7 +2331,8 @@ class ControlPanel(ctk.CTk):
                 'tts_alpha': round(self.alpha_slider.get(), 2),
                 'tts_beta': round(self.beta_slider.get(), 2),
                 'tts_reference_voice': self.reference_voice_entry.get().strip(),
-                'audio_player_enabled': self.audio_player_var.get()
+                'audio_player_enabled': self.audio_player_var.get(),
+                'send_responses_to_chat': self.send_to_chat_var.get()
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
@@ -2423,6 +2442,171 @@ class ControlPanel(ctk.CTk):
             overlay.mainloop()
         except Exception as e:
             print(f"Failed to open now playing overlay: {e}")
+
+    # ==================== IDLE ACTIONS TAB ====================
+    def build_idle_tab(self):
+        """Build the Idle Actions tab for autonomous behavior"""
+        title = ctk.CTkLabel(self.idle_tab, text="Idle Actions", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+
+        info = ctk.CTkLabel(
+            self.idle_tab,
+            text="When chat goes quiet, Gem will break the silence with a random thought.",
+            font=ctk.CTkFont(size=12)
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+
+        # Scrollable content frame
+        scroll = ctk.CTkScrollableFrame(self.idle_tab)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Enable toggle
+        self.idle_enabled_var = ctk.BooleanVar(value=True)
+        enable_check = ctk.CTkCheckBox(scroll, text="Enable Idle Actions", variable=self.idle_enabled_var)
+        enable_check.pack(anchor="w", padx=10, pady=10)
+
+        # Inactivity limit
+        limit_label = ctk.CTkLabel(scroll, text="Inactivity limit (seconds):", font=ctk.CTkFont(size=14))
+        limit_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.idle_inactivity_entry = ctk.CTkEntry(scroll, width=120)
+        self.idle_inactivity_entry.pack(anchor="w", padx=10, pady=5)
+
+        # Cooldown
+        cooldown_label = ctk.CTkLabel(scroll, text="Cooldown between monologues (seconds):", font=ctk.CTkFont(size=14))
+        cooldown_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.idle_cooldown_entry = ctk.CTkEntry(scroll, width=120)
+        self.idle_cooldown_entry.pack(anchor="w", padx=10, pady=5)
+
+        # OSC addresses
+        osc_label = ctk.CTkLabel(scroll, text="OSC Addresses", font=ctk.CTkFont(size=16, weight="bold"))
+        osc_label.pack(anchor="w", padx=10, pady=(15, 5))
+
+        state_label = ctk.CTkLabel(scroll, text="State address (bored/normal):", font=ctk.CTkFont(size=14))
+        state_label.pack(anchor="w", padx=10, pady=(5, 0))
+        self.idle_state_address_entry = ctk.CTkEntry(scroll)
+        self.idle_state_address_entry.pack(fill="x", padx=10, pady=5)
+
+        action_label = ctk.CTkLabel(scroll, text="Action address (talk/idle):", font=ctk.CTkFont(size=14))
+        action_label.pack(anchor="w", padx=10, pady=(5, 0))
+        self.idle_action_address_entry = ctk.CTkEntry(scroll)
+        self.idle_action_address_entry.pack(fill="x", padx=10, pady=5)
+
+        # OSC values
+        values_label = ctk.CTkLabel(scroll, text="OSC Values", font=ctk.CTkFont(size=16, weight="bold"))
+        values_label.pack(anchor="w", padx=10, pady=(15, 5))
+
+        values_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        values_frame.pack(fill="x", padx=10, pady=5)
+
+        bored_label = ctk.CTkLabel(values_frame, text="Bored:", font=ctk.CTkFont(size=13))
+        bored_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
+        self.idle_bored_entry = ctk.CTkEntry(values_frame, width=150)
+        self.idle_bored_entry.grid(row=0, column=1, padx=5, pady=5)
+
+        normal_label = ctk.CTkLabel(values_frame, text="Normal:", font=ctk.CTkFont(size=13))
+        normal_label.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.idle_normal_entry = ctk.CTkEntry(values_frame, width=150)
+        self.idle_normal_entry.grid(row=0, column=3, padx=5, pady=5)
+
+        talk_label = ctk.CTkLabel(values_frame, text="Talk:", font=ctk.CTkFont(size=13))
+        talk_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        self.idle_talk_entry = ctk.CTkEntry(values_frame, width=150)
+        self.idle_talk_entry.grid(row=1, column=1, padx=5, pady=5)
+
+        idle_val_label = ctk.CTkLabel(values_frame, text="Idle:", font=ctk.CTkFont(size=13))
+        idle_val_label.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        self.idle_idle_entry = ctk.CTkEntry(values_frame, width=150)
+        self.idle_idle_entry.grid(row=1, column=3, padx=5, pady=5)
+
+        # Topics
+        topics_label = ctk.CTkLabel(scroll, text="Monologue Topics (one per line):", font=ctk.CTkFont(size=14))
+        topics_label.pack(anchor="w", padx=10, pady=(15, 0))
+        self.idle_topics_text = ctk.CTkTextbox(scroll, height=120)
+        self.idle_topics_text.pack(fill="x", padx=10, pady=5)
+
+        # Monologue prompt
+        prompt_label = ctk.CTkLabel(scroll, text="Monologue Prompt (use {topic} as placeholder):", font=ctk.CTkFont(size=14))
+        prompt_label.pack(anchor="w", padx=10, pady=(15, 0))
+        self.idle_prompt_text = ctk.CTkTextbox(scroll, height=120)
+        self.idle_prompt_text.pack(fill="x", padx=10, pady=5)
+
+        # Save button
+        save_btn = ctk.CTkButton(scroll, text="Save Idle Settings", command=self.save_idle_settings)
+        save_btn.pack(pady=15)
+
+        # Load current settings
+        self.load_idle_settings()
+
+    def load_idle_settings(self):
+        """Load idle settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/settings", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+
+                self.idle_enabled_var.set(data.get('idle_actions_enabled', True))
+
+                self.idle_inactivity_entry.delete(0, "end")
+                self.idle_inactivity_entry.insert(0, str(data.get('idle_inactivity_limit', 60)))
+
+                self.idle_cooldown_entry.delete(0, "end")
+                self.idle_cooldown_entry.insert(0, str(data.get('idle_cooldown', 180)))
+
+                self.idle_state_address_entry.delete(0, "end")
+                self.idle_state_address_entry.insert(0, data.get('idle_osc_state_address', '/vtuber/state'))
+
+                self.idle_action_address_entry.delete(0, "end")
+                self.idle_action_address_entry.insert(0, data.get('idle_osc_action_address', '/vtuber/action'))
+
+                self.idle_bored_entry.delete(0, "end")
+                self.idle_bored_entry.insert(0, data.get('idle_osc_bored_value', 'bored'))
+
+                self.idle_normal_entry.delete(0, "end")
+                self.idle_normal_entry.insert(0, data.get('idle_osc_normal_value', 'normal'))
+
+                self.idle_talk_entry.delete(0, "end")
+                self.idle_talk_entry.insert(0, data.get('idle_osc_talk_value', 'talk_thoughtful'))
+
+                self.idle_idle_entry.delete(0, "end")
+                self.idle_idle_entry.insert(0, data.get('idle_osc_idle_value', 'idle'))
+
+                topics = data.get('idle_topics', [])
+                self.idle_topics_text.delete("1.0", "end")
+                self.idle_topics_text.insert("1.0", "\n".join(topics))
+
+                prompt = data.get('idle_monologue_prompt', '')
+                self.idle_prompt_text.delete("1.0", "end")
+                self.idle_prompt_text.insert("1.0", prompt)
+        except Exception as e:
+            print(f"Failed to load idle settings: {e}")
+
+    def save_idle_settings(self):
+        """Save idle settings to server"""
+        try:
+            topics_text = self.idle_topics_text.get("1.0", "end").strip()
+            topics = [t.strip() for t in topics_text.split("\n") if t.strip()]
+
+            prompt = self.idle_prompt_text.get("1.0", "end").strip()
+
+            payload = {
+                'idle_actions_enabled': self.idle_enabled_var.get(),
+                'idle_inactivity_limit': int(self.idle_inactivity_entry.get().strip() or 60),
+                'idle_cooldown': int(self.idle_cooldown_entry.get().strip() or 180),
+                'idle_osc_state_address': self.idle_state_address_entry.get().strip(),
+                'idle_osc_action_address': self.idle_action_address_entry.get().strip(),
+                'idle_osc_bored_value': self.idle_bored_entry.get().strip(),
+                'idle_osc_normal_value': self.idle_normal_entry.get().strip(),
+                'idle_osc_talk_value': self.idle_talk_entry.get().strip(),
+                'idle_osc_idle_value': self.idle_idle_entry.get().strip(),
+                'idle_topics': topics,
+                'idle_monologue_prompt': prompt,
+            }
+
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Idle settings saved")
+        except Exception as e:
+            print(f"Failed to save idle settings: {e}")
 
     def on_close(self):
         """Clean up on window close"""

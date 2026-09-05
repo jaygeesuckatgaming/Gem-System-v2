@@ -16,7 +16,8 @@ SSN_TARGETS = ["discord", "twitch", "youtube"]
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
 
 # StyleTTS2
-TTS_ENABLED = False
+TTS_ENABLED = True
+SEND_RESPONSES_TO_CHAT = True   # If False, responses go to TTS only (not chat)
 TTS_URL = "http://127.0.0.1:13300/tts"
 TTS_DIFFUSION_STEPS = 20
 TTS_EMBEDDING_SCALE = 1.0
@@ -35,6 +36,9 @@ AUDIO_DUCK_AMOUNT = -15
 AUDIO_DUCK_ATTACK_MS = 100
 AUDIO_DUCK_RELEASE_MS = 500
 
+# Background music / playlist volume (0.0 - 1.0)
+BACKGROUND_VOLUME = 0.5
+
 # Neurosync Blendshapes
 BLENDSHAPE_MOUTH_SCALE = 1.0
 BLENDSHAPE_EYE_SCALE = 1.0
@@ -47,6 +51,34 @@ OSC_ENABLED = True
 OSC_IP = "127.0.0.1"
 OSC_PORT = 10000
 OSC_ADDRESS = "/chat/message"
+
+# Idle Actions (autonomous behavior when chat goes quiet)
+IDLE_ACTIONS_ENABLED = True
+IDLE_INACTIVITY_LIMIT = 60        # Seconds of silence before entering idle state
+IDLE_COOLDOWN = 180               # Seconds between idle monologues (avoid spam)
+IDLE_OSC_STATE_ADDRESS = "/vtuber/state"     # OSC address for idle/normal state
+IDLE_OSC_ACTION_ADDRESS = "/vtuber/action"   # OSC address for talking animation
+IDLE_OSC_BORED_VALUE = "bored"
+IDLE_OSC_NORMAL_VALUE = "normal"
+IDLE_OSC_TALK_VALUE = "talk_thoughtful"
+IDLE_OSC_IDLE_VALUE = "idle"
+IDLE_TOPICS = [
+    "Complain about how weird humans are.",
+    "Talk about a random shower thought or philosophical paradox.",
+    "Talk about what you were doing before the stream started.",
+    "Bring up a random conspiracy theory about video game NPCs.",
+    "Ask a random rhetorical question to the silent chat.",
+]
+IDLE_MONOLOGUE_PROMPT = (
+    "Bring up this topic in character, as if it just popped into your head. "
+    "Do NOT mention the chat, the stream, or that it's quiet - just start "
+    "talking about the topic directly. Speak naturally and conversationally, "
+    "as if thinking out loud to yourself. Expand on the topic with a few "
+    "sentences (around 3 to 5 sentences), sharing your thoughts, opinions, or "
+    "a little story. Don't just state one line and stop - keep it flowing "
+    "like a casual ramble. "
+    "Topic focus: {topic}"
+)
 
 # Twitch Music Check (verify songs against Twitch DJ Program)
 TWITCH_MUSIC_CHECK_ENABLED = True

@@ -18,6 +18,7 @@ import config
 from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient
 from clients.audio_player import AudioPlayer
 from clients.opencode_client import format_opencode_response
+from clients.idle_manager import IdleManager
 
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
@@ -33,6 +34,7 @@ def _tts_url_for_engine():
 
 tts = TTSClient(tts_url=_tts_url_for_engine())
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
+music.background_volume = getattr(config, 'BACKGROUND_VOLUME', 0.5)
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 
@@ -42,9 +44,61 @@ def _on_download_complete(query: str):
 
 music.on_download_complete = _on_download_complete
 
+# Idle manager (autonomous behavior when chat goes quiet)
+idle = IdleManager(
+    inactivity_limit=config.IDLE_INACTIVITY_LIMIT,
+    cooldown=config.IDLE_COOLDOWN,
+    enabled=config.IDLE_ACTIONS_ENABLED,
+    osc_state_address=config.IDLE_OSC_STATE_ADDRESS,
+    osc_action_address=config.IDLE_OSC_ACTION_ADDRESS,
+    osc_bored_value=config.IDLE_OSC_BORED_VALUE,
+    osc_normal_value=config.IDLE_OSC_NORMAL_VALUE,
+    osc_talk_value=config.IDLE_OSC_TALK_VALUE,
+    osc_idle_value=config.IDLE_OSC_IDLE_VALUE,
+    topics=config.IDLE_TOPICS,
+)
+def _idle_send_osc(address: str, value: str):
+    send_osc_message(address, value)
+
+idle.send_osc = _idle_send_osc
+
+
+async def send_response(response: str):
+    """Send a response to TTS and (optionally) to chat."""
+    if config.TTS_ENABLED:
+        await tts.speak(response)
+    if config.SEND_RESPONSES_TO_CHAT:
+        await ssn.send_message(response, targets=config.SSN_TARGETS)
+
+
+async def _idle_monologue(topic: str):
+    """Generate and speak an idle monologue via the LLM + TTS."""
+    monologue_prompt = config.IDLE_MONOLOGUE_PROMPT.format(topic=topic)
+    system_prompt = f"{config.SYSTEM_PROMPT}\n\n{monologue_prompt}"
+    response = await llm.chat("", system_prompt=system_prompt)
+    print(f"[IDLE MONOLOGUE] {response}")
+
+    await cognee.remember("Gem", response)
+    _last_ai_responses.append(html.unescape(response).strip())
+
+    await send_response(response)
+
+
+idle.on_monologue = _idle_monologue
+
+
+def _idle_interrupt():
+    """Stop the currently playing monologue audio."""
+    audio_player.stop_playback()
+
+idle.on_interrupt = _idle_interrupt
+
 # Audio player (plays TTS output when not using Neurosync)
 _tts_output_path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
 audio_player = AudioPlayer(watch_path=_tts_output_path, device_name=config.AUDIO_OUTPUT_DEVICE or None)
+
+# Let the idle manager know when the VTuber is speaking (to avoid piling up monologues)
+idle.is_speaking_check = audio_player.is_playing
 
 # Wire ducking callbacks (lower music volume when TTS speaks)
 def _duck_music():
@@ -108,6 +162,7 @@ def save_config():
         settings = {
             'TTS_ENGINE': (config.TTS_ENGINE, True),
             'TTS_ENABLED': (config.TTS_ENABLED, False),
+            'SEND_RESPONSES_TO_CHAT': (config.SEND_RESPONSES_TO_CHAT, False),
             'TTS_URL': (config.TTS_URL, True),
             'POCKET_TTS_URL': (config.POCKET_TTS_URL, True),
             'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
@@ -131,6 +186,15 @@ def save_config():
             'OSC_IP': (config.OSC_IP, True),
             'OSC_PORT': (config.OSC_PORT, False),
             'OSC_ADDRESS': (config.OSC_ADDRESS, True),
+            'IDLE_ACTIONS_ENABLED': (config.IDLE_ACTIONS_ENABLED, False),
+            'IDLE_INACTIVITY_LIMIT': (config.IDLE_INACTIVITY_LIMIT, False),
+            'IDLE_COOLDOWN': (config.IDLE_COOLDOWN, False),
+            'IDLE_OSC_STATE_ADDRESS': (config.IDLE_OSC_STATE_ADDRESS, True),
+            'IDLE_OSC_ACTION_ADDRESS': (config.IDLE_OSC_ACTION_ADDRESS, True),
+            'IDLE_OSC_BORED_VALUE': (config.IDLE_OSC_BORED_VALUE, True),
+            'IDLE_OSC_NORMAL_VALUE': (config.IDLE_OSC_NORMAL_VALUE, True),
+            'IDLE_OSC_TALK_VALUE': (config.IDLE_OSC_TALK_VALUE, True),
+            'IDLE_OSC_IDLE_VALUE': (config.IDLE_OSC_IDLE_VALUE, True),
             'LIVELINK_IP': (config.LIVELINK_IP, True),
             'LIVELINK_PORT': (config.LIVELINK_PORT, False),
             'TWITCH_MUSIC_CHECK_ENABLED': (config.TWITCH_MUSIC_CHECK_ENABLED, False),
@@ -306,6 +370,35 @@ def is_list_songs_command(text: str) -> bool:
     return any(phrase in text_lower for phrase in phrases)
 
 
+def is_playlist_command(text: str) -> bool:
+    """Check if a message is asking to play the playlist folder."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "play my playlist",
+        "play the playlist",
+        "play playlist",
+        "start my playlist",
+        "start the playlist",
+        "start playlist",
+        "play my music",
+        "play the music folder",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
+def is_stop_playlist_command(text: str) -> bool:
+    """Check if a message is asking to stop the playlist."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "stop my playlist",
+        "stop the playlist",
+        "stop playlist",
+        "stop my music",
+        "stop the music folder",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
 def translate_emotes(text: str) -> str:
     """Translate chat emotes into their meanings so the LLM understands them.
     Returns the original text with emote meanings appended in brackets.
@@ -468,6 +561,9 @@ async def handle_incoming_message(data: dict):
             print(f"  → Ignoring echo of last AI response")
             return
     
+    # Track chat activity for the idle manager (any real message resets the timer)
+    idle.update_activity()
+    
     # Check for wake word
     wake_word = None
     for word in config.WAKE_WORDS:
@@ -493,6 +589,25 @@ async def handle_incoming_message(data: dict):
             # Not in library, fall back to download
             await ssn.send_message(f"🎤 I don't have '{sing_name}' in my library, downloading it instead...", targets=config.SSN_TARGETS)
             music.download_song(sing_name)
+        return
+    
+    # Check for playlist command (play all MP3s in the playlist folder) - BEFORE song command
+    if is_playlist_command(message):
+        print(f"🎵 Playlist command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        if music.play_playlist():
+            count = len(music.list_playlist_songs())
+            await ssn.send_message(f"🎵 Playing your playlist ({count} songs)!", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message("Your playlist folder is empty.", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for stop playlist command
+    if is_stop_playlist_command(message):
+        print(f"🛑 Stop playlist command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        music.stop_playlist()
+        await ssn.send_message("🛑 Stopped the playlist.", targets=config.SSN_TARGETS)
         return
     
     # Check for song command (intercept before LLM)
@@ -603,9 +718,7 @@ async def handle_incoming_message(data: dict):
         print(f"[GEM] {response}")
         await cognee.remember("Gem", response)
         _last_ai_responses.append(html.unescape(response).strip())
-        if config.TTS_ENABLED:
-            await tts.speak(response)
-        await ssn.send_message(response, targets=config.SSN_TARGETS)
+        await send_response(response)
         return
     
     # Check for time query (intercept before LLM so it uses the real time)
@@ -623,9 +736,7 @@ async def handle_incoming_message(data: dict):
         print(f"[GEM] {response}")
         await cognee.remember("Gem", response)
         _last_ai_responses.append(html.unescape(response).strip())
-        if config.TTS_ENABLED:
-            await tts.speak(response)
-        await ssn.send_message(response, targets=config.SSN_TARGETS)
+        await send_response(response)
         return
 
     # Store user message in memory
@@ -651,12 +762,8 @@ async def handle_incoming_message(data: dict):
     # Track response to prevent echo
     _last_ai_responses.append(html.unescape(response).strip())
     
-    # Send response to TTS first (it takes time to synthesize)
-    if config.TTS_ENABLED:
-        await tts.speak(response)
-    
-    # Send response to SSN (chat appears after audio is ready)
-    await ssn.send_message(response, targets=config.SSN_TARGETS)
+    # Send response to TTS and (optionally) chat
+    await send_response(response)
 
 
 async def get_memory_context(speaker: str, message: str) -> str:
@@ -759,7 +866,8 @@ async def api_status():
             'alpha': config.TTS_ALPHA,
             'beta': config.TTS_BETA,
             'reference_voice': config.TTS_REFERENCE_VOICE,
-            'audio_player_enabled': config.AUDIO_PLAYER_ENABLED
+            'audio_player_enabled': config.AUDIO_PLAYER_ENABLED,
+            'send_responses_to_chat': config.SEND_RESPONSES_TO_CHAT
         },
         'audio': {
             'output_device': config.AUDIO_OUTPUT_DEVICE,
@@ -864,7 +972,18 @@ async def api_get_settings():
         'wake_words': config.WAKE_WORDS,
         'ollama_model': config.OLLAMA_MODEL,
         'ssn_session_id': config.SSN_SESSION_ID,
-        'voice_speaker_name': config.VOICE_SPEAKER_NAME
+        'voice_speaker_name': config.VOICE_SPEAKER_NAME,
+        'idle_actions_enabled': config.IDLE_ACTIONS_ENABLED,
+        'idle_inactivity_limit': config.IDLE_INACTIVITY_LIMIT,
+        'idle_cooldown': config.IDLE_COOLDOWN,
+        'idle_osc_state_address': config.IDLE_OSC_STATE_ADDRESS,
+        'idle_osc_action_address': config.IDLE_OSC_ACTION_ADDRESS,
+        'idle_osc_bored_value': config.IDLE_OSC_BORED_VALUE,
+        'idle_osc_normal_value': config.IDLE_OSC_NORMAL_VALUE,
+        'idle_osc_talk_value': config.IDLE_OSC_TALK_VALUE,
+        'idle_osc_idle_value': config.IDLE_OSC_IDLE_VALUE,
+        'idle_topics': config.IDLE_TOPICS,
+        'idle_monologue_prompt': config.IDLE_MONOLOGUE_PROMPT,
     })
 
 
@@ -889,6 +1008,8 @@ async def api_update_settings():
         config.SSN_TARGETS = data['ssn_targets']
     if 'tts_enabled' in data:
         config.TTS_ENABLED = data['tts_enabled']
+    if 'send_responses_to_chat' in data:
+        config.SEND_RESPONSES_TO_CHAT = data['send_responses_to_chat']
     if 'tts_engine' in data:
         config.TTS_ENGINE = data['tts_engine']
         tts.tts_url = _tts_url_for_engine()
@@ -943,6 +1064,38 @@ async def api_update_settings():
         config.OSC_ADDRESS = data['osc_address']
     if 'osc_actions' in data:
         config.OSC_ACTIONS = data['osc_actions']
+    if 'idle_actions_enabled' in data:
+        config.IDLE_ACTIONS_ENABLED = data['idle_actions_enabled']
+        idle.enabled = data['idle_actions_enabled']
+    if 'idle_inactivity_limit' in data:
+        config.IDLE_INACTIVITY_LIMIT = data['idle_inactivity_limit']
+        idle.inactivity_limit = data['idle_inactivity_limit']
+    if 'idle_cooldown' in data:
+        config.IDLE_COOLDOWN = data['idle_cooldown']
+        idle.cooldown = data['idle_cooldown']
+    if 'idle_osc_state_address' in data:
+        config.IDLE_OSC_STATE_ADDRESS = data['idle_osc_state_address']
+        idle.osc_state_address = data['idle_osc_state_address']
+    if 'idle_osc_action_address' in data:
+        config.IDLE_OSC_ACTION_ADDRESS = data['idle_osc_action_address']
+        idle.osc_action_address = data['idle_osc_action_address']
+    if 'idle_osc_bored_value' in data:
+        config.IDLE_OSC_BORED_VALUE = data['idle_osc_bored_value']
+        idle.osc_bored_value = data['idle_osc_bored_value']
+    if 'idle_osc_normal_value' in data:
+        config.IDLE_OSC_NORMAL_VALUE = data['idle_osc_normal_value']
+        idle.osc_normal_value = data['idle_osc_normal_value']
+    if 'idle_osc_talk_value' in data:
+        config.IDLE_OSC_TALK_VALUE = data['idle_osc_talk_value']
+        idle.osc_talk_value = data['idle_osc_talk_value']
+    if 'idle_osc_idle_value' in data:
+        config.IDLE_OSC_IDLE_VALUE = data['idle_osc_idle_value']
+        idle.osc_idle_value = data['idle_osc_idle_value']
+    if 'idle_topics' in data:
+        config.IDLE_TOPICS = data['idle_topics']
+        idle.topics = data['idle_topics']
+    if 'idle_monologue_prompt' in data:
+        config.IDLE_MONOLOGUE_PROMPT = data['idle_monologue_prompt']
     if 'livelink_ip' in data:
         config.LIVELINK_IP = data['livelink_ip']
     if 'livelink_port' in data:
@@ -1321,7 +1474,9 @@ async def start_background_tasks():
     # If you switch to WebSocket-only chat, re-enable by uncommenting below:
     # ssn.on_message = handle_incoming_message
     # asyncio.create_task(ssn.start_websocket_listener())
-    pass
+
+    # Start the idle manager monitor loop (autonomous behavior)
+    asyncio.create_task(idle.monitor_loop())
 
 
 @app.before_serving
