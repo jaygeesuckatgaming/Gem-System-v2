@@ -15,6 +15,9 @@ SSN_TARGETS = ["discord", "twitch", "youtube"]
 # Cognee Memory
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
 
+# TTS Engine Selection: "styletts2" or "pocket"
+TTS_ENGINE = "styletts2"
+
 # StyleTTS2
 TTS_ENABLED = True
 SEND_RESPONSES_TO_CHAT = True   # If False, responses go to TTS only (not chat)
@@ -23,12 +26,16 @@ TTS_DIFFUSION_STEPS = 20
 TTS_EMBEDDING_SCALE = 1.0
 TTS_ALPHA = 0.3
 TTS_BETA = 0.7
-TTS_REFERENCE_VOICE = "../reference_voices/earn_lucky_pitch_minus_one_samplerate_24000_short.wav"
+TTS_REFERENCE_VOICE = ""  # Path to a reference voice .wav file
+
+# Pocket TTS
+POCKET_TTS_URL = "http://127.0.0.1:13301/tts"
 
 # Audio Player (plays TTS output when not using Neurosync)
 AUDIO_PLAYER_ENABLED = True
 TTS_OUTPUT_PATH = "tts_output/server_output.wav"
 AUDIO_OUTPUT_DEVICE = ""  # Empty = system default
+AUDIO_INPUT_DEVICE = ""   # Empty = not set
 
 # Audio Ducking (lower music volume when TTS speaks)
 AUDIO_DUCKING_ENABLED = False
@@ -46,11 +53,24 @@ BLENDSHAPE_EYEBROW_SCALE = 0.6
 BLENDSHAPE_EYEWIDE_SCALE = 0.4
 BLENDSHAPE_EYESQUINT_SCALE = 1.0
 
+# Neurosync API
+NEUROSYNC_LOCAL_URL = "http://127.0.0.1:9000/audio_to_blendshapes"
+NEUROSYNC_API_KEY = "YOUR-NEUROSYNC-API-KEY"
+NEUROSYNC_REMOTE_URL = "https://api.neurosync.info/audio_to_blendshapes"
+
 # OSC (emotes + movement)
 OSC_ENABLED = True
 OSC_IP = "127.0.0.1"
 OSC_PORT = 10000
 OSC_ADDRESS = "/chat/message"
+
+# LiveLink (Unreal Engine facial animation)
+LIVELINK_IP = "127.0.0.1"
+LIVELINK_PORT = 11111
+
+# Custom OSC actions (phrase -> OSC address + value)
+# Each action: {"phrase": "turn off light 1", "address": "/light/1", "value": "off"}
+OSC_ACTIONS = []
 
 # Idle Actions (autonomous behavior when chat goes quiet)
 IDLE_ACTIONS_ENABLED = True
@@ -89,7 +109,7 @@ VOICE_SPEAKER_NAME = "JayGee"
 # OpenCode API
 OPENCODE_ENABLED = True
 OPENCODE_API_URL = "http://localhost:4096"
-OPENCODE_WORKSPACE = "C:/Users/jayge/Documents/AI/Gem-System-v2"
+OPENCODE_WORKSPACE = ""  # Path to your project workspace
 
 # Vision Service
 VISION_ENABLED = True
