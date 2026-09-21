@@ -27,10 +27,8 @@ class TTSClient:
         return False
 
     async def speak(self, text: str) -> bool:
-        """Send text to the TTS server for synthesis"""
-        if not self.enabled:
-            return False
-
+        """Send text to the TTS server for synthesis.
+        Auto-reconnects if the server wasn't available at startup."""
         # Clean text (remove special chars, normalize whitespace)
         clean_text = re.sub(r"[^a-zA-Z0-9\s.,?!'\"():-]", "", text)
         clean_text = re.sub(r"\s+", " ", clean_text).strip()
@@ -43,6 +41,7 @@ class TTSClient:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.tts_url, json=payload)
                 if response.status_code == 200:
+                    self.enabled = True
                     print(f"✓ TTS complete")
                     return True
                 else:

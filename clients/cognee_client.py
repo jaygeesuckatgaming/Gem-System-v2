@@ -32,7 +32,7 @@ class CogneeClient:
 
         async def _do_remember():
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=300.0) as client:
                     payload = {
                         "speaker": speaker,
                         "text": text,

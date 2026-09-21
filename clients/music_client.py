@@ -39,6 +39,9 @@ class MusicClient:
 
         # Playlist folder (all MP3s played sequentially)
         self.playlist_folder = os.path.join(MUSIC_DIR, "playlist")
+        self._playlist_active = False
+        self._playlist_paused = False
+        self._playlist_index = 0
 
         self.device_name = device_name
         self.queue: List[str] = []
@@ -49,6 +52,11 @@ class MusicClient:
         self._stop_requested = False
         self.on_download_complete: Optional[Callable] = None
         self.state_file = os.path.join(PROJECT_ROOT, "now_playing_state.txt")
+
+        # Request playback queue (songs play one at a time)
+        self._request_queue: List[str] = []
+        self._request_lock = threading.Lock()
+        self._request_worker = None
 
         # Twitch music checker
         self.twitch_checker = TwitchMusicChecker()
@@ -174,8 +182,36 @@ class MusicClient:
         finally:
             self.current_download = None
 
+    def play_mp3(self, filename: str) -> bool:
+        """Play a downloaded MP3 by filename (queued, plays one at a time)."""
+        filepath = os.path.join(self.download_folder, filename)
+        if not os.path.exists(filepath):
+            print(f"❌ File not found: {filepath}")
+            return False
+
+        self._enqueue_request(filepath)
+        return True
+
+    def _enqueue_request(self, filepath: str):
+        """Add a request to the playback queue and start the worker if needed."""
+        with self._request_lock:
+            self._request_queue.append(filepath)
+            print(f"🎵 Queued request: {os.path.basename(filepath)} (queue: {len(self._request_queue)})")
+            if self._request_worker is None or not self._request_worker.is_alive():
+                self._request_worker = threading.Thread(target=self._request_worker_loop, daemon=True)
+                self._request_worker.start()
+
+    def _request_worker_loop(self):
+        """Play queued requests one at a time."""
+        while True:
+            with self._request_lock:
+                if not self._request_queue:
+                    break
+                filepath = self._request_queue.pop(0)
+            self._play_mp3(filepath)
+
     def _play_latest_download(self):
-        """Play the most recently downloaded MP3"""
+        """Play the most recently downloaded MP3 (queued)."""
         try:
             mp3_files = sorted(
                 [f for f in os.listdir(self.download_folder) if f.endswith('.mp3')],
@@ -188,7 +224,7 @@ class MusicClient:
 
             latest = os.path.join(self.download_folder, mp3_files[0])
             print(f"🎵 Playing downloaded song: {mp3_files[0]}")
-            self._play_mp3(latest)
+            self._enqueue_request(latest)
         except Exception as e:
             print(f"✗ Failed to play downloaded song: {e}")
 
@@ -205,7 +241,8 @@ class MusicClient:
             print(f"✗ State file write error: {e}")
 
     def _play_mp3(self, filepath: str):
-        """Play a single MP3 file using pygame (routed to Voicemeeter device)"""
+        """Play a single MP3 file on a dedicated Sound channel (so the music
+        channel used by background/playlist is never clobbered)."""
         try:
             import pygame
 
@@ -213,94 +250,71 @@ class MusicClient:
             self.now_playing = os.path.basename(filepath)
             self._write_state_file(self.now_playing)
 
-            # Pause background music while the request plays
-            self.pause_background_song()
-
-            # Resolve device name (handle '[ID] Name' format)
-            resolved_device = None
-            if self.device_name:
-                try:
-                    import sounddevice as sd
-                    devices = sd.query_devices()
-                    if ']' in self.device_name:
-                        device_id = int(self.device_name.split(']')[0].strip('['))
-                        for dev in devices:
-                            if dev['index'] == device_id and dev['max_output_channels'] > 0:
-                                resolved_device = dev['name']
-                                break
-                    else:
-                        resolved_device = self.device_name
-                except Exception:
-                    resolved_device = self.device_name
-
-            # Initialize mixer with device
-            if resolved_device:
-                from pygame._sdl2 import get_audio_device_names
-                available = get_audio_device_names(False)
-                final_device = None
-                for device in available:
-                    if resolved_device == device or resolved_device in device:
-                        final_device = device
-                        break
-                if final_device:
-                    pygame.mixer.pre_init(44100, -16, 2, 512, devicename=final_device)
-                    pygame.init()
-                    pygame.mixer.init()
-                else:
-                    pygame.mixer.init()
-            else:
+            # Initialize mixer (reuse existing mixer if already initialized by AudioPlayer)
+            if not pygame.mixer.get_init():
+                pygame.init()
                 pygame.mixer.init()
 
-            pygame.mixer.music.load(filepath)
-            pygame.mixer.music.play()
-            while pygame.mixer.music.get_busy():
+            if not pygame.mixer.get_init():
+                raise RuntimeError("Audio system not initialised")
+
+            # Pause background music and playlist (preserves their position)
+            self.pause_background_song()
+            self.pause_playlist()
+
+            # Play the request on a dedicated channel, leaving mixer.music alone
+            request_sound = pygame.mixer.Sound(filepath)
+            request_channel = request_sound.play()
+            while request_channel.get_busy():
                 import time
                 if self._stop_requested:
-                    pygame.mixer.music.stop()
+                    request_channel.stop()
                     self._stop_requested = False
                     break
                 time.sleep(0.1)
-            pygame.mixer.music.unload()
+
             self.now_playing = None
             self._write_state_file(None)
 
-            # Resume background music after the request finishes
+            # Resume background music and playlist (position preserved)
             self.resume_background_song()
+            self.resume_playlist()
         except Exception as e:
             print(f"✗ MP3 playback error: {e}")
             self.now_playing = None
             self._write_state_file(None)
             self.resume_background_song()
+            self.resume_playlist()
 
     def stop_music(self) -> bool:
-        """Stop the currently playing request song (if any)."""
+        """Stop the currently playing request song AND any playlist/background music."""
+        stopped = False
         try:
             import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+            # Stop any request song playing on a Sound channel
+            if self._stop_requested or self.now_playing:
                 self._stop_requested = True
+            # Stop the playlist (music channel)
+            if self._playlist_active:
+                self.stop_playlist()
+                stopped = True
+            # Stop background music
+            if self.background_song_path:
+                self.stop_background_song()
+                stopped = True
+            # Stop the music channel outright (covers playlist + background)
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
                 pygame.mixer.music.stop()
-                self.now_playing = None
-                self._write_state_file(None)
-                print("🎵 Music stopped")
-                return True
+                stopped = True
+            # Stop the request channel
+            self._stop_requested = True
             self.now_playing = None
             self._write_state_file(None)
-            return False
+            print("🎵 Music stopped")
+            return True
         except Exception as e:
             print(f"✗ Stop music error: {e}")
             return False
-
-    def play_mp3(self, filename: str) -> bool:
-        """Play a downloaded MP3 by filename"""
-        filepath = os.path.join(self.download_folder, filename)
-        if not os.path.exists(filepath):
-            print(f"❌ File not found: {filepath}")
-            return False
-
-        print(f"🎵 Playing: {filename}")
-        thread = threading.Thread(target=self._play_mp3, args=(filepath,), daemon=True)
-        thread.start()
-        return True
 
     # ==================== BACKGROUND SONGS ====================
     def list_background_songs(self) -> List[str]:
@@ -470,11 +484,14 @@ class MusicClient:
             if not pygame.mixer.get_init():
                 pygame.mixer.init()
 
-            while True:
-                for song in songs:
-                    if self._stop_requested:
-                        self._stop_requested = False
+            self._playlist_active = True
+            self._playlist_paused = False
+
+            while self._playlist_active:
+                for i, song in enumerate(songs):
+                    if not self._playlist_active:
                         return
+                    self._playlist_index = i
                     filepath = os.path.join(self.playlist_folder, song)
                     self.now_playing = song
                     self._write_state_file(song)
@@ -483,23 +500,52 @@ class MusicClient:
                     pygame.mixer.music.set_volume(self.background_volume)
                     print(f"🎵 Playlist now playing: {song}")
                     while pygame.mixer.music.get_busy():
-                        if self._stop_requested:
+                        if not self._playlist_active:
                             pygame.mixer.music.stop()
-                            self._stop_requested = False
-                            self.now_playing = None
-                            self._write_state_file(None)
                             return
+                        if self._playlist_paused:
+                            pygame.mixer.music.pause()
+                            while self._playlist_paused and self._playlist_active:
+                                time.sleep(0.1)
+                            if not self._playlist_active:
+                                return
+                            pygame.mixer.music.unpause()
                         time.sleep(0.1)
                 # Loop back to the start
         except Exception as e:
             print(f"✗ Playlist playback error: {e}")
         finally:
+            self._playlist_active = False
+            self._playlist_paused = False
             self.now_playing = None
             self._write_state_file(None)
 
+    def pause_playlist(self) -> bool:
+        """Pause the playlist (e.g. while a request plays)."""
+        if not self._playlist_active:
+            return False
+        self._playlist_paused = True
+        try:
+            import pygame
+            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
+                pygame.mixer.music.pause()
+        except Exception:
+            pass
+        print("🎵 Playlist paused")
+        return True
+
+    def resume_playlist(self) -> bool:
+        """Resume the playlist after a request finishes."""
+        if not self._playlist_active:
+            return False
+        self._playlist_paused = False
+        print("🎵 Playlist resumed")
+        return True
+
     def stop_playlist(self) -> bool:
         """Stop the playlist playback."""
-        self._stop_requested = True
+        self._playlist_active = False
+        self._playlist_paused = False
         try:
             import pygame
             if pygame.mixer.get_init() and pygame.mixer.music.get_busy():

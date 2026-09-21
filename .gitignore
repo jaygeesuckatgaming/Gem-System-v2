@@ -40,8 +40,11 @@ music/requests/*.webm
 music/requests/*.mkv
 music/requests/karaoke/*.wav
 music/background_songs/*.mp3
-music/playlist/*.mp3
+music/playlist/
 yt-dlp.exe
+
+# Temp audio from voice listener
+temp_audio_chunk.wav
 
 # Neurosync (separate git repos)
 Neurosync/NeuroSync_Local_API/

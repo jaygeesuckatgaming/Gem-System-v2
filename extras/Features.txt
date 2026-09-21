@@ -1,0 +1,20 @@
+Features
+01. Music Request system
+02. Background Music That Pauses/Resumes
+03. AI Chat Bot
+04. AI VTuber
+05. AI Speech (Using Now : StyleTT2 with Cloned voice)
+06. Configured to use Ollama gemma4:31b-cloud today..
+07. Generates Blendshapes that is sent over LiveLink
+08. Checks music requests against Twitch DJ Catalog
+09. Social Stream Ninja is used for chat communication
+10. Can communicate with 100+ platforms and services
+11. Can look up the time for places.
+12. OpenCode Integration.
+13. Music recognition.
+14. Vision (Cam,NDI)
+15. Hearing
+16. OSC Control (Send OSC commands to Unreal Engine)
+17. Can Read Chat
+18. NDI Computer Screen
+19. Multiple Camera angles

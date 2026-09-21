@@ -30,10 +30,7 @@ class LLMClient:
             return False
     
     async def chat(self, message: str, system_prompt: Optional[str] = None) -> str:
-        """Send message and get response"""
-        if not self.enabled:
-            return "LLM not connected"
-        
+        """Send message and get response (auto-reconnects if not connected)"""
         try:
             messages = []
             if system_prompt:
@@ -41,6 +38,21 @@ class LLMClient:
             messages.append({'role': 'user', 'content': message})
             
             response = self.client.chat(model=self.model, messages=messages)
+            self.enabled = True
             return response['message']['content']
         except Exception as e:
             return f"Error: {e}"
+
+    def chat_sync(self, message: str, system_prompt: Optional[str] = None) -> str:
+        """Synchronous version of chat (for use in non-async contexts)."""
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            messages.append({'role': 'user', 'content': message})
+            
+            response = self.client.chat(model=self.model, messages=messages)
+            self.enabled = True
+            return response['message']['content']
+        except Exception as e:
+            return ""

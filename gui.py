@@ -1052,8 +1052,21 @@ class ControlPanel(ctk.CTk):
         self.bg_volume_slider.pack(fill="x", pady=5)
         self.bg_volume_slider.set(1.0)
         
+        # Save settings button
+        save_btn = ctk.CTkButton(scroll_frame, text="Save Settings", command=self.save_music_settings)
+        save_btn.pack(pady=15)
+        
         # Start progress polling
         self.after(500, self.update_background_progress)
+    
+    def save_music_settings(self):
+        """Persist the background music volume to config.py"""
+        try:
+            volume = round(self.bg_volume_slider.get(), 2)
+            httpx.post(f"{SERVER_URL}/api/settings", json={"background_volume": volume}, timeout=5)
+            print(f"✓ Saved music settings (volume={volume})")
+        except Exception as e:
+            print(f"Failed to save music settings: {e}")
     
     def toggle_background_pause(self):
         """Toggle pause/resume for background music"""
@@ -1572,8 +1585,30 @@ class ControlPanel(ctk.CTk):
         value_entry.pack(side="left", padx=5, pady=5)
         value_entry.insert(0, value)
         
+        test_btn = ctk.CTkButton(
+            row, text="Test", width=50,
+            command=lambda: self.test_osc_action(address_entry, value_entry)
+        )
+        test_btn.pack(side="left", padx=5, pady=5)
+        
         delete_btn = ctk.CTkButton(row, text="✕", width=30, fg_color="red", hover_color="darkred", command=lambda: row.destroy())
         delete_btn.pack(side="left", padx=5, pady=5)
+    
+    def test_osc_action(self, address_entry, value_entry):
+        """Send a test OSC command using the current row's address and value."""
+        address = address_entry.get().strip()
+        value = value_entry.get().strip()
+        if not address:
+            print("OSC test: no address entered")
+            return
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/osc/test", json={"address": address, "value": value}, timeout=5)
+            if response.status_code == 200:
+                print(f"✓ OSC test sent: {address} = {value}")
+            else:
+                print(f"✗ OSC test failed: {response.status_code}")
+        except Exception as e:
+            print(f"OSC test error: {e}")
     
     def load_osc_actions(self):
         """Load existing OSC actions from server"""

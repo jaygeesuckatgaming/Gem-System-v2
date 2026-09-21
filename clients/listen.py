@@ -25,11 +25,11 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from scipy.io.wavfile import read as read_wav
 
 # --- Configuration (static values) ---
-VAD_AGGRESSIVENESS = 3
+VAD_AGGRESSIVENESS = 1
 SAMPLE_RATE = 16000
 FRAME_DURATION_MS = 20
 FRAMES_PER_BUFFER = int(SAMPLE_RATE * FRAME_DURATION_MS / 1000)
-SILENCE_THRESHOLD_S = 1.5
+SILENCE_THRESHOLD_S = 2.0
 PRE_BUFFER_S = 0.5
 WAV_FILE_NAME = "temp_audio_chunk.wav"
 
@@ -97,7 +97,7 @@ def send_to_mcp(transcribed_text: str, mcp_url: str):
         "vision_context": "" # Audio client has no vision context
     }
     try:
-        response = requests.post(mcp_url, json=payload, timeout=5)
+        response = requests.post(mcp_url, json=payload, timeout=60)
         response.raise_for_status()
         print("AUDIO INFO: MCP received the task.")
     except requests.exceptions.RequestException as e:

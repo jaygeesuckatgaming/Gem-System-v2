@@ -29,34 +29,74 @@ class SSNClient:
         print(f"✓ SSN configured: {self.api_url} (session: {self.session_id})")
         return True
     
-    async def send_message(self, text: str, targets: Optional[List[str]] = None) -> bool:
-        """Send message to social platforms via HTTP POST"""
+    async def send_message(self, text: str, targets: Optional[List[str]] = None, max_length: int = 200) -> bool:
+        """Send message to social platforms via HTTP POST.
+        Splits long messages into multiple posts (default 200 chars each)."""
         if not self.enabled:
             return False
         
         if not targets:
             targets = ['discord', 'twitch', 'youtube']
         
+        # Split text into chunks of max_length characters (on word boundaries)
+        chunks = self._split_text(text, max_length)
+        
         success = False
         async with httpx.AsyncClient(timeout=10) as client:
             for target in targets:
-                try:
-                    payload = {
-                        "action": "sendChat",
-                        "value": text,
-                        "target": target
-                    }
-                    response = await client.post(
-                        f"{self.api_url}/{self.session_id}",
-                        json=payload
-                    )
-                    print(f"  → SSN sent to {target}. Status: {response.status_code}, Reply: {response.text[:200]}")
-                    if response.status_code == 200:
-                        success = True
-                except Exception as e:
-                    print(f"  ✗ SSN failed for {target}: {e}")
+                for chunk in chunks:
+                    try:
+                        payload = {
+                            "action": "sendChat",
+                            "value": chunk,
+                            "target": target
+                        }
+                        response = await client.post(
+                            f"{self.api_url}/{self.session_id}",
+                            json=payload
+                        )
+                        print(f"  → SSN sent to {target}. Status: {response.status_code}, Reply: {response.text[:200]}")
+                        if response.status_code == 200:
+                            success = True
+                    except Exception as e:
+                        print(f"  ✗ SSN failed for {target}: {e}")
         
         return success
+    
+    @staticmethod
+    def _split_text(text: str, max_length: int) -> List[str]:
+        """Split text into chunks of at most max_length characters, breaking on word boundaries."""
+        text = text.strip()
+        if len(text) <= max_length:
+            return [text]
+        
+        chunks = []
+        words = text.split()
+        current = ""
+        
+        for word in words:
+            # If a single word is longer than max_length, hard-split it
+            if len(word) > max_length:
+                if current:
+                    chunks.append(current.strip())
+                    current = ""
+                for i in range(0, len(word), max_length):
+                    chunks.append(word[i:i+max_length])
+                continue
+            
+            # Try adding the word to the current chunk
+            test = f"{current} {word}".strip()
+            if len(test) <= max_length:
+                current = test
+            else:
+                if current:
+                    chunks.append(current.strip())
+                current = word
+        
+        if current:
+            chunks.append(current.strip())
+        
+        return chunks
     
     async def start_websocket_listener(self):
         """Start WebSocket listener for incoming chat messages (with reconnect)"""

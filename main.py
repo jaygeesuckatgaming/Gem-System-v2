@@ -9,6 +9,7 @@ import json
 import os
 import re
 from collections import deque
+from typing import Optional
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from quart import Quart, request, jsonify
@@ -35,6 +36,9 @@ def _tts_url_for_engine():
 tts = TTSClient(tts_url=_tts_url_for_engine())
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 music.background_volume = getattr(config, 'BACKGROUND_VOLUME', 0.5)
+
+# Wire the LLM into the Twitch music checker so it can parse song requests
+music.twitch_checker.llm_parse_function = llm.chat_sync
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 
@@ -80,6 +84,7 @@ async def _idle_monologue(topic: str):
 
     await cognee.remember("Gem", response)
     _last_ai_responses.append(html.unescape(response).strip())
+    add_to_chat_history("Gem", response)
 
     await send_response(response)
 
@@ -118,6 +123,21 @@ audio_player.unduck_callback = _unduck_music
 
 # Track recent AI responses to prevent echo loops
 _last_ai_responses = deque(maxlen=10)
+
+# Rolling chat history so the LLM has context of the recent conversation
+_recent_chat = deque(maxlen=20)
+
+
+def add_to_chat_history(speaker: str, text: str):
+    """Add a message to the rolling chat history."""
+    _recent_chat.append(f"{speaker}: {text}")
+
+
+def get_chat_history_context() -> str:
+    """Return the recent chat history as a context string for the LLM."""
+    if not _recent_chat:
+        return ""
+    return "Recent chat history:\n" + "\n".join(_recent_chat)
 
 # Track known speakers (for nickname resolution)
 _known_speakers = set()
@@ -177,6 +197,7 @@ def save_config():
             'AUDIO_DUCK_AMOUNT': (config.AUDIO_DUCK_AMOUNT, False),
             'AUDIO_DUCK_ATTACK_MS': (config.AUDIO_DUCK_ATTACK_MS, False),
             'AUDIO_DUCK_RELEASE_MS': (config.AUDIO_DUCK_RELEASE_MS, False),
+            'BACKGROUND_VOLUME': (config.BACKGROUND_VOLUME, False),
             'BLENDSHAPE_MOUTH_SCALE': (config.BLENDSHAPE_MOUTH_SCALE, False),
             'BLENDSHAPE_EYE_SCALE': (config.BLENDSHAPE_EYE_SCALE, False),
             'BLENDSHAPE_EYEBROW_SCALE': (config.BLENDSHAPE_EYEBROW_SCALE, False),
@@ -221,6 +242,15 @@ def save_config():
             pattern = re.compile(rf'^{key}\s*=\s*.*$', re.MULTILINE)
             content = pattern.sub(f'{key} = {new_value}', content)
 
+        # Persist OSC_ACTIONS (a list of dicts, handled separately)
+        import pprint
+        actions_literal = pprint.pformat(config.OSC_ACTIONS, width=120)
+        osc_pattern = re.compile(r'^OSC_ACTIONS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
+        if osc_pattern.search(content):
+            content = osc_pattern.sub(f'OSC_ACTIONS = {actions_literal}', content)
+        else:
+            content += f'\nOSC_ACTIONS = {actions_literal}\n'
+
         with open(CONFIG_FILE, "w") as f:
             f.write(content)
         print("✓ Settings written to config.py")
@@ -262,6 +292,25 @@ def extract_song_command(text: str):
             if song_name:
                 return song_name
     
+    return None
+
+
+def extract_dedication(text: str) -> Optional[str]:
+    """Extract a dedication target from a song request (e.g. 'dedicate it to Teenz').
+    Returns the dedication name, or None if no dedication.
+    """
+    import re
+    text_lower = text.lower()
+    patterns = [
+        r'dedicate (?:it|this|the song)?\s*(?:to|for)\s+([a-z0-9_@]+)',
+        r'for\s+([a-z0-9_@]+)\s*$',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            name = match.group(1).strip()
+            if name:
+                return name
     return None
 
 
@@ -615,6 +664,9 @@ async def handle_incoming_message(data: dict):
     if song_name:
         print(f"🎵 Song command detected: '{song_name}'")
         
+        # Extract dedication (e.g. "dedicate it to Teenz")
+        dedication = extract_dedication(message)
+        
         # Store the song request in memory
         await cognee.remember(speaker, message)
         
@@ -635,11 +687,17 @@ async def handle_incoming_message(data: dict):
         existing = music.check_song_exists(song_name)
         if existing:
             music.play_mp3(existing)
-            await ssn.send_message(f"🎵 Already have '{existing}' - playing it now!", targets=config.SSN_TARGETS)
+            if dedication:
+                await ssn.send_message(f"🎵 Playing '{existing}' - dedicated to {dedication}!", targets=config.SSN_TARGETS)
+            else:
+                await ssn.send_message(f"🎵 Already have '{existing}' - playing it now!", targets=config.SSN_TARGETS)
             return
         
         music.download_song(song_name)
-        await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
+        if dedication:
+            await ssn.send_message(f"🎵 Got it! Downloading '{song_name}' - dedicated to {dedication}!", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
         return
     
     # Check for stop music command (intercept before LLM)
@@ -684,7 +742,18 @@ async def handle_incoming_message(data: dict):
         address = osc_action.get('address', config.OSC_ADDRESS)
         value = osc_action.get('value', '')
         send_osc_message(address, value)
-        await ssn.send_message(f"🎛️ Done! {osc_action.get('phrase')}", targets=config.SSN_TARGETS)
+        await cognee.remember(speaker, message)
+        # Let the LLM come up with a natural in-character comment
+        response = await llm.chat(
+            f"The user said: '{message}'. You just performed the action '{osc_action.get('value')}'. "
+            f"Reply in character with a short, casual one-liner reacting to doing that action. "
+            f"Keep it under 2 sentences and don't mention OSC or commands.",
+            system_prompt=config.SYSTEM_PROMPT
+        )
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        await send_response(response)
         return
     
     # Check for OpenCode command (intercept before LLM)
@@ -742,6 +811,9 @@ async def handle_incoming_message(data: dict):
     # Store user message in memory
     await cognee.remember(speaker, message)
     
+    # Add to rolling chat history
+    add_to_chat_history(speaker, message)
+    
     # Translate emotes so the LLM understands them
     llm_message = translate_emotes(message)
     
@@ -753,11 +825,19 @@ async def handle_incoming_message(data: dict):
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
     
+    # Include recent chat history so the LLM knows what was just said
+    chat_history = get_chat_history_context()
+    if chat_history:
+        system_prompt = f"{system_prompt}\n\n{chat_history}"
+    
     response = await llm.chat(llm_message, system_prompt=system_prompt)
     print(f"[GEM] {response}")
     
     # Store AI response in memory
     await cognee.remember("Gem", response)
+    
+    # Add AI response to rolling chat history
+    add_to_chat_history("Gem", response)
     
     # Track response to prevent echo
     _last_ai_responses.append(html.unescape(response).strip())
@@ -775,12 +855,12 @@ async def get_memory_context(speaker: str, message: str) -> str:
     try:
         # Wrap the whole recall in a timeout so it can't block the chat
         async with asyncio.timeout(3.0):
-            # 1. Get user profile
-            user_results = await cognee.recall(f"[chat] {speaker}:", top_k=5)
+            # 1. Get user profile (natural-language queries work better with semantic search)
+            user_results = await cognee.recall(f"what do I remember about {speaker}", top_k=5)
             if not user_results:
-                user_results = await cognee.recall(f"{speaker}:", top_k=5)
+                user_results = await cognee.recall(f"conversations with {speaker}", top_k=5)
             if not user_results:
-                user_results = await cognee.recall(f"{speaker}", top_k=5)
+                user_results = await cognee.recall(speaker, top_k=5)
             
             if user_results:
                 memory_context += f"\n\nThings you remember about {speaker}:"
@@ -811,11 +891,11 @@ async def get_memory_context(speaker: str, message: str) -> str:
                     search_terms.append(resolved)
             
             for term in search_terms[:3]:
-                entity_results = await cognee.recall(f"[chat] {term}:", top_k=3)
+                entity_results = await cognee.recall(f"what do I remember about {term}", top_k=3)
                 if not entity_results:
-                    entity_results = await cognee.recall(f"{term}:", top_k=3)
+                    entity_results = await cognee.recall(f"conversations with {term}", top_k=3)
                 if not entity_results:
-                    entity_results = await cognee.recall(f"{term}", top_k=3)
+                    entity_results = await cognee.recall(term, top_k=3)
                 
                 if entity_results:
                     memory_context += f"\n\nThings you remember about {term}:"
@@ -1124,6 +1204,9 @@ async def api_update_settings():
         config.VISION_CAMERA_INDEX = data['vision_camera_index']
     if 'vision_ndi_source_name' in data:
         config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
+    if 'background_volume' in data:
+        config.BACKGROUND_VOLUME = data['background_volume']
+        music.background_volume = data['background_volume']
     
     # Persist settings to config.py (single source of truth)
     save_config()
@@ -1181,34 +1264,38 @@ async def api_osc_emote():
     return jsonify({'status': 'ok' if success else 'error'})
 
 
+@app.route('/api/osc/test', methods=['POST'])
+async def api_osc_test():
+    """Send a raw OSC message (address + value) for testing"""
+    data = await request.get_json()
+    address = data.get('address', '')
+    value = data.get('value', '')
+    if not address:
+        return jsonify({'status': 'error', 'error': 'No address specified'}), 400
+    
+    success = send_osc_message(address, value)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
 def send_osc_emote(emote_name: str) -> bool:
     """Send an emote via OSC (UDP)"""
     return send_osc_message(config.OSC_ADDRESS, emote_name)
 
 
 def send_osc_message(address: str, value) -> bool:
-    """Send a generic OSC message (UDP) with a string value"""
-    import socket
-    
+    """Send a generic OSC message (UDP) with a string value + True bool.
+    Matches the format Unreal expects (string + True)."""
+    if not address:
+        print(f"OSC skipped: empty address (value='{value}')")
+        return False
     try:
-        ip = config.OSC_IP
-        port = config.OSC_PORT
-        
-        # Build OSC message
-        address_bytes = address.encode('utf-8')
-        address_padded = address_bytes + b'\x00' * ((4 - len(address_bytes) % 4) % 4)
-        type_tag = b',s\x00\x00'
-        value_str = str(value)
-        str_len = len(value_str.encode('utf-8'))
-        length_bytes = str_len.to_bytes(4, 'big')
-        arg_bytes = value_str.encode('utf-8')
-        arg_padded = arg_bytes + b'\x00' * ((4 - len(arg_bytes) % 4) % 4)
-        message = address_padded + type_tag + length_bytes + arg_padded
-        
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.sendto(message, (ip, port))
-        
-        print(f"OSC SENT: '{value_str}' to {ip}:{port} {address}")
+        from pythonosc import udp_client, osc_message_builder
+        builder = osc_message_builder.OscMessageBuilder(address=address)
+        builder.add_arg(str(value), builder.ARG_TYPE_STRING)
+        builder.add_arg(True, builder.ARG_TYPE_TRUE)
+        client = udp_client.SimpleUDPClient(config.OSC_IP, config.OSC_PORT)
+        client.send(builder.build())
+        print(f"OSC SENT: '{value}' to {config.OSC_IP}:{config.OSC_PORT} {address}")
         return True
     except Exception as e:
         print(f"OSC failed: {e}")
@@ -1396,75 +1483,23 @@ async def chat():
 
 @app.route('/process', methods=['POST'])
 async def process():
-    """Process transcribed audio from listen.py (microphone input)"""
+    """Process transcribed audio from listen.py (microphone input).
+    Pipes the transcribed text into the normal chat handler."""
     data = await request.get_json()
     text = data.get('text', '') or data.get('chatmessage', '')
-    source = data.get('source', 'microphone')
     
     if not text:
         return jsonify({'status': 'error', 'error': 'No text provided'}), 400
     
     print(f"\n[VOICE] {text}")
     
-    # Prevent echo loop - ignore if the transcribed text matches a recent AI response
-    # (the microphone picks up Gem's own voice and re-transcribes it)
-    text_clean = html.unescape(text).strip()
-    for last_response in _last_ai_responses:
-        if text_clean == last_response:
-            print(f"  → Ignoring echo of last AI response")
-            return jsonify({'status': 'ok', 'ignored': 'echo'})
+    # Pipe voice input into the normal chat handler (same path as chat messages)
+    await handle_incoming_message({
+        'chatmessage': text,
+        'chatname': config.VOICE_SPEAKER_NAME,
+    })
     
-    # Voice input doesn't need a wake word - process directly
-    # Check for song command
-    song_name = extract_song_command(text)
-    if song_name:
-        print(f"🎵 Song command detected: '{song_name}'")
-        await cognee.remember(config.VOICE_SPEAKER_NAME, text)
-        if config.TWITCH_MUSIC_CHECK_ENABLED:
-            result = music.verify_song(song_name)
-            if result.get('status') == 'restricted':
-                await ssn.send_message(result.get('message', "Sorry, that song is restricted."), targets=config.SSN_TARGETS)
-                return jsonify({'status': 'ok'})
-        music.download_song(song_name)
-        await ssn.send_message(f"🎵 Got it! Downloading '{song_name}'...", targets=config.SSN_TARGETS)
-        return jsonify({'status': 'ok'})
-    
-    # Check for custom OSC action
-    osc_action = match_osc_action(text)
-    if osc_action:
-        print(f"🎛️ OSC action detected: '{osc_action.get('phrase')}'")
-        send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
-        await ssn.send_message(f"🎛️ Done! {osc_action.get('phrase')}", targets=config.SSN_TARGETS)
-        return jsonify({'status': 'ok'})
-    
-    # Store in memory
-    await cognee.remember(config.VOICE_SPEAKER_NAME, text)
-    
-    # Recall memory context
-    memory_context = await get_memory_context(config.VOICE_SPEAKER_NAME, text)
-    
-    # Get response from LLM
-    system_prompt = config.SYSTEM_PROMPT
-    if memory_context:
-        system_prompt = f"{system_prompt}\n\n{memory_context}"
-    
-    response = await llm.chat(text, system_prompt=system_prompt)
-    print(f"[GEM] {response}")
-    
-    # Store AI response in memory
-    await cognee.remember("Gem", response)
-    
-    # Track response to prevent echo
-    _last_ai_responses.append(html.unescape(response).strip())
-    
-    # Send response to TTS first (it takes time to synthesize)
-    if config.TTS_ENABLED:
-        await tts.speak(response)
-    
-    # Send response to SSN (chat appears after audio is ready)
-    await ssn.send_message(response, targets=config.SSN_TARGETS)
-    
-    return jsonify({'status': 'ok', 'response': response})
+    return jsonify({'status': 'ok'})
 
 
 async def start_background_tasks():
