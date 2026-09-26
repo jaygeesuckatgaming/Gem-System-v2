@@ -57,6 +57,7 @@ class MusicClient:
         self._request_queue: List[str] = []
         self._request_lock = threading.Lock()
         self._request_worker = None
+        self._request_channel = None
 
         # Twitch music checker
         self.twitch_checker = TwitchMusicChecker()
@@ -265,6 +266,7 @@ class MusicClient:
             # Play the request on a dedicated channel, leaving mixer.music alone
             request_sound = pygame.mixer.Sound(filepath)
             request_channel = request_sound.play()
+            self._request_channel = request_channel
             while request_channel.get_busy():
                 import time
                 if self._stop_requested:
@@ -273,6 +275,7 @@ class MusicClient:
                     break
                 time.sleep(0.1)
 
+            self._request_channel = None
             self.now_playing = None
             self._write_state_file(None)
 
@@ -352,12 +355,19 @@ class MusicClient:
             print(f"✗ Background playback error: {e}")
 
     def duck_music(self, duck_amount: float = -15.0, attack_ms: int = 100, release_ms: int = 500):
-        """Lower background music volume (ducking) when TTS speaks"""
+        """Lower music volume (background/playlist AND request songs) when TTS speaks"""
         try:
             import pygame
+            # Duck the request channel (dedicated Sound channel)
+            if self._request_channel is not None and self._request_channel.get_busy():
+                current_vol = self._request_channel.get_volume()
+                target_vol = max(0.0, current_vol * (10.0 ** (duck_amount / 20.0)))
+                self._request_channel.set_volume(target_vol)
+                print(f"🎵 Request song ducked to {target_vol:.2f}")
+
+            # Duck background/playlist (mixer.music channel)
             if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
                 return
-            # Use the user's desired volume (do NOT overwrite it with the current mixer volume)
             target_volume = max(0.0, self.background_volume * (10.0 ** (duck_amount / 20.0)))
             current_volume = self.background_volume
             steps = max(1, attack_ms // 20)
@@ -371,9 +381,15 @@ class MusicClient:
             print(f"✗ Duck music error: {e}")
 
     def unduck_music(self, release_ms: int = 500):
-        """Restore background music volume after TTS finishes"""
+        """Restore music volume (background/playlist AND request songs) after TTS"""
         try:
             import pygame
+            # Restore the request channel volume
+            if self._request_channel is not None and self._request_channel.get_busy():
+                self._request_channel.set_volume(1.0)
+                print("🎵 Request song volume restored")
+
+            # Restore background/playlist volume
             if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
                 return
             target_volume = self.background_volume

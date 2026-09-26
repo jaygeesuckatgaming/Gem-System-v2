@@ -124,6 +124,9 @@ audio_player.unduck_callback = _unduck_music
 # Track recent AI responses to prevent echo loops
 _last_ai_responses = deque(maxlen=10)
 
+# Pause flag: when True, the MCP ignores incoming chat (acts as a mute/standby)
+_paused = False
+
 # Rolling chat history so the LLM has context of the recent conversation
 _recent_chat = deque(maxlen=20)
 
@@ -190,6 +193,8 @@ def save_config():
             'TTS_ALPHA': (config.TTS_ALPHA, False),
             'TTS_BETA': (config.TTS_BETA, False),
             'TTS_REFERENCE_VOICE': (config.TTS_REFERENCE_VOICE, True),
+            'TTS_COPY_TO': (config.TTS_COPY_TO, True),
+            'TTS_OUTPUT_PATH': (config.TTS_OUTPUT_PATH, True),
             'AUDIO_PLAYER_ENABLED': (config.AUDIO_PLAYER_ENABLED, False),
             'AUDIO_OUTPUT_DEVICE': (config.AUDIO_OUTPUT_DEVICE, True),
             'AUDIO_INPUT_DEVICE': (config.AUDIO_INPUT_DEVICE, True),
@@ -219,6 +224,11 @@ def save_config():
             'LIVELINK_IP': (config.LIVELINK_IP, True),
             'LIVELINK_PORT': (config.LIVELINK_PORT, False),
             'TWITCH_MUSIC_CHECK_ENABLED': (config.TWITCH_MUSIC_CHECK_ENABLED, False),
+            'LAYA_ENABLED': (config.LAYA_ENABLED, False),
+            'LAYA_URL': (config.LAYA_URL, True),
+            'LAYA_ANIMATION_THRESHOLD': (config.LAYA_ANIMATION_THRESHOLD, False),
+            'LAYA_REPLY_THRESHOLD': (config.LAYA_REPLY_THRESHOLD, False),
+            'LAYA_OSC_ADDRESS': (config.LAYA_OSC_ADDRESS, True),
             'VOICE_SPEAKER_NAME': (config.VOICE_SPEAKER_NAME, True),
             'OPENCODE_ENABLED': (config.OPENCODE_ENABLED, False),
             'OPENCODE_API_URL': (config.OPENCODE_API_URL, True),
@@ -250,6 +260,22 @@ def save_config():
             content = osc_pattern.sub(f'OSC_ACTIONS = {actions_literal}', content)
         else:
             content += f'\nOSC_ACTIONS = {actions_literal}\n'
+
+        # Persist LAYA_ANIMATION_MAP (a list of dicts, handled separately)
+        laya_map_literal = pprint.pformat(config.LAYA_ANIMATION_MAP, width=120)
+        laya_pattern = re.compile(r'^LAYA_ANIMATION_MAP\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
+        if laya_pattern.search(content):
+            content = laya_pattern.sub(f'LAYA_ANIMATION_MAP = {laya_map_literal}', content)
+        else:
+            content += f'\nLAYA_ANIMATION_MAP = {laya_map_literal}\n'
+
+        # Persist LAYA_ANIMATION_OPTIONS (a list of strings, handled separately)
+        options_literal = pprint.pformat(config.LAYA_ANIMATION_OPTIONS, width=120)
+        options_pattern = re.compile(r'^LAYA_ANIMATION_OPTIONS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
+        if options_pattern.search(content):
+            content = options_pattern.sub(f'LAYA_ANIMATION_OPTIONS = {options_literal}', content)
+        else:
+            content += f'\nLAYA_ANIMATION_OPTIONS = {options_literal}\n'
 
         with open(CONFIG_FILE, "w") as f:
             f.write(content)
@@ -587,6 +613,10 @@ def extract_time_location(text: str) -> str:
 
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
+    # If paused, silently ignore all incoming messages
+    if _paused:
+        return
+
     # Extract message data
     message = data.get('chatmessage', '')
     speaker = data.get('chatname', 'Unknown')
@@ -822,6 +852,11 @@ async def handle_incoming_message(data: dict):
     
     # Get response from LLM
     system_prompt = config.SYSTEM_PROMPT
+    
+    # Inject the actual current date/time so the LLM never guesses the wrong day
+    now = datetime.now(ZoneInfo("Asia/Bangkok"))
+    system_prompt = f"{system_prompt}\n\nToday is {now.strftime('%A, %B %d, %Y')}. The current time is {now.strftime('%I:%M %p')}."
+    
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
     
@@ -914,8 +949,29 @@ async def health():
         'status': 'ok',
         'llm': llm.enabled,
         'ssn': ssn.enabled,
-        'cognee': cognee.enabled
+        'cognee': cognee.enabled,
+        'paused': _paused
     })
+
+
+@app.route('/api/pause', methods=['POST'])
+async def api_pause():
+    """Pause the MCP - ignore incoming chat messages"""
+    global _paused
+    _paused = True
+    idle.enabled = False
+    print("⏸️ MCP PAUSED - ignoring incoming chat")
+    return jsonify({'status': 'ok', 'paused': True})
+
+
+@app.route('/api/resume', methods=['POST'])
+async def api_resume():
+    """Resume the MCP - process incoming chat messages again"""
+    global _paused
+    _paused = False
+    idle.enabled = config.IDLE_ACTIONS_ENABLED
+    print("▶️ MCP RESUMED - processing incoming chat")
+    return jsonify({'status': 'ok', 'paused': False})
 
 
 @app.route('/api/status', methods=['GET'])
@@ -946,6 +1002,7 @@ async def api_status():
             'alpha': config.TTS_ALPHA,
             'beta': config.TTS_BETA,
             'reference_voice': config.TTS_REFERENCE_VOICE,
+            'copy_to': config.TTS_COPY_TO,
             'audio_player_enabled': config.AUDIO_PLAYER_ENABLED,
             'send_responses_to_chat': config.SEND_RESPONSES_TO_CHAT
         },
@@ -971,7 +1028,8 @@ async def api_status():
             'livelink': {
                 'ip': config.LIVELINK_IP,
                 'port': config.LIVELINK_PORT
-            }
+            },
+            'watcher_audio_path': config.TTS_OUTPUT_PATH
         },
         'opencode': {
             'enabled': config.OPENCODE_ENABLED,
@@ -1064,6 +1122,13 @@ async def api_get_settings():
         'idle_osc_idle_value': config.IDLE_OSC_IDLE_VALUE,
         'idle_topics': config.IDLE_TOPICS,
         'idle_monologue_prompt': config.IDLE_MONOLOGUE_PROMPT,
+        'laya_enabled': config.LAYA_ENABLED,
+        'laya_url': config.LAYA_URL,
+        'laya_animation_threshold': config.LAYA_ANIMATION_THRESHOLD,
+        'laya_reply_threshold': config.LAYA_REPLY_THRESHOLD,
+        'laya_osc_address': config.LAYA_OSC_ADDRESS,
+        'laya_animation_options': config.LAYA_ANIMATION_OPTIONS,
+        'laya_animation_map': config.LAYA_ANIMATION_MAP,
     })
 
 
@@ -1113,6 +1178,8 @@ async def api_update_settings():
         config.TTS_BETA = data['tts_beta']
     if 'tts_reference_voice' in data:
         config.TTS_REFERENCE_VOICE = data['tts_reference_voice']
+    if 'tts_copy_to' in data:
+        config.TTS_COPY_TO = data['tts_copy_to']
     if 'audio_player_enabled' in data:
         config.AUDIO_PLAYER_ENABLED = data['audio_player_enabled']
     if 'audio_output_device' in data:
@@ -1126,6 +1193,8 @@ async def api_update_settings():
         config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
     if 'audio_duck_release_ms' in data:
         config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+    if 'tts_output_path' in data:
+        config.TTS_OUTPUT_PATH = data['tts_output_path']
     if 'blendshape_mouth_scale' in data:
         config.BLENDSHAPE_MOUTH_SCALE = data['blendshape_mouth_scale']
     if 'blendshape_eye_scale' in data:
@@ -1207,6 +1276,20 @@ async def api_update_settings():
     if 'background_volume' in data:
         config.BACKGROUND_VOLUME = data['background_volume']
         music.background_volume = data['background_volume']
+    if 'laya_enabled' in data:
+        config.LAYA_ENABLED = data['laya_enabled']
+    if 'laya_url' in data:
+        config.LAYA_URL = data['laya_url']
+    if 'laya_animation_threshold' in data:
+        config.LAYA_ANIMATION_THRESHOLD = data['laya_animation_threshold']
+    if 'laya_reply_threshold' in data:
+        config.LAYA_REPLY_THRESHOLD = data['laya_reply_threshold']
+    if 'laya_osc_address' in data:
+        config.LAYA_OSC_ADDRESS = data['laya_osc_address']
+    if 'laya_animation_options' in data:
+        config.LAYA_ANIMATION_OPTIONS = data['laya_animation_options']
+    if 'laya_animation_map' in data:
+        config.LAYA_ANIMATION_MAP = data['laya_animation_map']
     
     # Persist settings to config.py (single source of truth)
     save_config()
@@ -1477,7 +1560,9 @@ async def api_music_unduck():
 async def chat():
     """HTTP chat endpoint (alternative to WebSocket)"""
     data = await request.get_json()
-    await handle_incoming_message(data)
+    # Fire-and-forget: process in the background so the caller (e.g. Laya)
+    # isn't blocked waiting for the full LLM + TTS pipeline to finish.
+    asyncio.create_task(handle_incoming_message(data))
     return jsonify({'status': 'ok'})
 
 

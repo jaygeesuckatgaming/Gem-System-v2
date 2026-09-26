@@ -33,6 +33,9 @@ tts/pocket-tts/
 # Reference voice audio files (large binaries)
 tts/reference_voices/*.wav
 
+# Laya model checkpoint (large, downloaded)
+models/
+
 # Music downloads (large binaries)
 music/requests/*.mp3
 music/requests/*.mp4

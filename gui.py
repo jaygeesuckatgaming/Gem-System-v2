@@ -30,6 +30,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 
+
 class ControlPanel(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -59,6 +60,7 @@ class ControlPanel(ctk.CTk):
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         self.extras_tab = self.tabview.add("Extras")
         self.idle_tab = self.tabview.add("Idle Actions")
+        self.laya_tab = self.tabview.add("Laya")
         
         self.build_status_tab()
         self.build_llm_tab()
@@ -73,6 +75,10 @@ class ControlPanel(ctk.CTk):
         self.build_ssn_tab()
         self.build_extras_tab()
         self.build_idle_tab()
+        self.build_laya_tab()
+        
+        # Auto-start the MCP server so the panel can populate settings
+        self.start_mcp_server()
         
         # Start status polling
         self.polling = True
@@ -116,21 +122,24 @@ class ControlPanel(ctk.CTk):
         self.status_vision = ctk.CTkLabel(status_frame, text="Vision: Checking...", font=ctk.CTkFont(size=16))
         self.status_vision.pack(anchor="w", padx=20, pady=10)
         
-        # Refresh button
-        refresh_btn = ctk.CTkButton(self.status_tab, text="Refresh", command=self.refresh_status)
-        refresh_btn.pack(pady=20)
-        
-        # Start Cognee Server button
-        start_cognee_btn = ctk.CTkButton(self.status_tab, text="Start Cognee Server", command=self.start_cognee_server)
-        start_cognee_btn.pack(pady=10)
-        
-        # Start MCP Server button
-        start_mcp_btn = ctk.CTkButton(self.status_tab, text="Start MCP Server", command=self.start_mcp_server)
-        start_mcp_btn.pack(pady=10)
-        
-        # Start Listener button
-        start_listen_btn = ctk.CTkButton(self.status_tab, text="Start Audio Listener", command=self.start_listener)
-        start_listen_btn.pack(pady=10)
+        # Action buttons (side by side to save vertical space)
+        btn_frame = ctk.CTkFrame(self.status_tab, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=20, pady=10)
+
+        refresh_btn = ctk.CTkButton(btn_frame, text="Refresh", command=self.refresh_status)
+        refresh_btn.pack(side="left", padx=5)
+
+        start_cognee_btn = ctk.CTkButton(btn_frame, text="Start Cognee", command=self.start_cognee_server)
+        start_cognee_btn.pack(side="left", padx=5)
+
+        start_mcp_btn = ctk.CTkButton(btn_frame, text="Start MCP", command=self.start_mcp_server)
+        start_mcp_btn.pack(side="left", padx=5)
+
+        start_listen_btn = ctk.CTkButton(btn_frame, text="Start Listener", command=self.start_listener)
+        start_listen_btn.pack(side="left", padx=5)
+
+        self.pause_btn = ctk.CTkButton(btn_frame, text="⏸ Pause MCP", command=self.toggle_pause)
+        self.pause_btn.pack(side="left", padx=5)
     
     def _launch_detached(self, bat_path: str):
         """Launch a batch file in its own detached console window"""
@@ -152,16 +161,45 @@ class ControlPanel(ctk.CTk):
             print("✓ Started Cognee Server")
     
     def start_mcp_server(self):
-        """Launch the MCP server (main.py)"""
+        """Launch the MCP server (main.py) if it isn't already running."""
+        if self._server_running():
+            print("MCP Server already running - not starting another instance")
+            return
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_mcp.bat")
         if self._launch_detached(bat_path):
             print("✓ Started MCP Server")
+
+    def _server_running(self) -> bool:
+        """Check if the MCP server (port 5000) is already responding."""
+        try:
+            response = httpx.get(f"{SERVER_URL}/health", timeout=1.0)
+            return response.status_code == 200
+        except Exception:
+            return False
     
     def start_listener(self):
         """Launch the audio listener (listen.py)"""
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_listen.bat")
         if self._launch_detached(bat_path):
             print("✓ Started Audio Listener")
+
+    def toggle_pause(self):
+        """Pause or resume the MCP server (toggle)."""
+        try:
+            # Check current paused state from health endpoint
+            resp = httpx.get(f"{SERVER_URL}/health", timeout=2)
+            paused = resp.json().get('paused', False) if resp.status_code == 200 else False
+
+            if paused:
+                httpx.post(f"{SERVER_URL}/api/resume", timeout=2)
+                self.pause_btn.configure(text="⏸ Pause MCP")
+                print("▶ MCP resumed")
+            else:
+                httpx.post(f"{SERVER_URL}/api/pause", timeout=2)
+                self.pause_btn.configure(text="▶ Resume MCP")
+                print("⏸ MCP paused")
+        except Exception as e:
+            print(f"Failed to toggle pause: {e}")
     
     # ==================== LLM TAB ====================
     def build_llm_tab(self):
@@ -433,6 +471,12 @@ class ControlPanel(ctk.CTk):
         voice_label.pack(anchor="w", padx=20, pady=(10, 0))
         self.reference_voice_entry = ctk.CTkEntry(scroll)
         self.reference_voice_entry.pack(fill="x", padx=20, pady=(0, 10))
+
+        # Network share copy target
+        copy_to_label = ctk.CTkLabel(scroll, text="Copy Audio To (network share, empty = disabled):", font=ctk.CTkFont(size=13))
+        copy_to_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.copy_to_entry = ctk.CTkEntry(scroll)
+        self.copy_to_entry.pack(fill="x", padx=20, pady=(0, 10))
         
         # Test TTS section
         test_label = ctk.CTkLabel(scroll, text="Test TTS:", font=ctk.CTkFont(size=14))
@@ -1278,6 +1322,14 @@ class ControlPanel(ctk.CTk):
         
         self.start_watcher_btn = ctk.CTkButton(btn_row, text="Start Watcher To Face", width=180, command=self.start_neurosync_watcher)
         self.start_watcher_btn.pack(side="left", padx=5)
+
+        # Audio file path for watcher_to_face
+        audio_path_label = ctk.CTkLabel(self.neurosync_tab, text="Watcher Audio File Path:", font=ctk.CTkFont(size=13))
+        audio_path_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.watcher_audio_entry = ctk.CTkEntry(self.neurosync_tab)
+        self.watcher_audio_entry.pack(fill="x", padx=20, pady=(0, 5))
+        save_audio_path_btn = ctk.CTkButton(self.neurosync_tab, text="Save Audio Path", command=self.save_watcher_audio_path)
+        save_audio_path_btn.pack(anchor="w", padx=20, pady=(0, 10))
         
         # Scrollable frame
         scroll_frame = ctk.CTkScrollableFrame(self.neurosync_tab)
@@ -1462,6 +1514,9 @@ class ControlPanel(ctk.CTk):
                 self.livelink_ip_entry.insert(0, livelink.get('ip', '10.237.43.193'))
                 self.livelink_port_entry.delete(0, "end")
                 self.livelink_port_entry.insert(0, str(livelink.get('port', 11111)))
+
+                self.watcher_audio_entry.delete(0, "end")
+                self.watcher_audio_entry.insert(0, neuro.get('watcher_audio_path', 'tts_output/server_output.wav'))
         except Exception as e:
             print(f"Failed to load Neurosync settings: {e}")
     
@@ -1511,6 +1566,18 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             self.emote_status_label.configure(text="Save failed!", text_color="red")
             print(f"Failed to save LiveLink settings: {e}")
+
+    def save_watcher_audio_path(self):
+        """Save the watcher_to_face audio file path to server"""
+        try:
+            payload = {
+                'tts_output_path': self.watcher_audio_entry.get().strip()
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Watcher audio path saved")
+        except Exception as e:
+            print(f"Failed to save watcher audio path: {e}")
     
     def send_test_emote(self, emote_name):
         """Send a test emote via OSC"""
@@ -2099,6 +2166,8 @@ class ControlPanel(ctk.CTk):
         self.load_opencode_settings()
         self.load_vision_settings()
         self.load_osc_actions()
+        self.load_idle_settings()
+        self.load_laya_settings()
         self.refresh_music_library()
         self.refresh_music_queue()
         self.refresh_background_songs()
@@ -2349,6 +2418,9 @@ class ControlPanel(ctk.CTk):
                 self.reference_voice_entry.delete(0, "end")
                 self.reference_voice_entry.insert(0, tts.get('reference_voice', ''))
 
+                self.copy_to_entry.delete(0, "end")
+                self.copy_to_entry.insert(0, tts.get('copy_to', ''))
+
                 self.send_to_chat_var.set(tts.get('send_responses_to_chat', True))
         except Exception as e:
             print(f"Failed to load TTS settings: {e}")
@@ -2366,6 +2438,7 @@ class ControlPanel(ctk.CTk):
                 'tts_alpha': round(self.alpha_slider.get(), 2),
                 'tts_beta': round(self.beta_slider.get(), 2),
                 'tts_reference_voice': self.reference_voice_entry.get().strip(),
+                'tts_copy_to': self.copy_to_entry.get().strip(),
                 'audio_player_enabled': self.audio_player_var.get(),
                 'send_responses_to_chat': self.send_to_chat_var.get()
             }
@@ -2386,7 +2459,8 @@ class ControlPanel(ctk.CTk):
                     'embedding_scale': round(self.embedding_scale_slider.get(), 1),
                     'alpha': round(self.alpha_slider.get(), 2),
                     'beta': round(self.beta_slider.get(), 2),
-                    'reference_voice': self.reference_voice_entry.get().strip()
+                    'reference_voice': self.reference_voice_entry.get().strip(),
+                    'copy_to': self.copy_to_entry.get().strip()
                 }
                 
                 response = httpx.post(f"{base_url}/settings", json=payload, timeout=5)
@@ -2454,6 +2528,24 @@ class ControlPanel(ctk.CTk):
         np_btn = ctk.CTkButton(np_frame, text="Open Now Playing Overlay", command=self.open_now_playing_overlay)
         np_btn.pack(anchor="w", padx=20, pady=(0, 15))
 
+        # --- Text Scroller ---
+        ts_frame = ctk.CTkFrame(self.extras_tab)
+        ts_frame.pack(fill="x", padx=20, pady=10)
+
+        ts_label = ctk.CTkLabel(ts_frame, text="Text Scroller", font=ctk.CTkFont(size=16, weight="bold"))
+        ts_label.pack(anchor="w", padx=20, pady=(15, 5))
+
+        ts_desc = ctk.CTkLabel(
+            ts_frame,
+            text="Scrolls a text file vertically (e.g. chat overlay / credits).",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        ts_desc.pack(anchor="w", padx=20, pady=(0, 10))
+
+        ts_btn = ctk.CTkButton(ts_frame, text="Open Text Scroller", command=self.open_text_scroller)
+        ts_btn.pack(anchor="w", padx=20, pady=(0, 15))
+
     def open_hardware_monitor(self):
         """Launch the hardware monitor in a separate window"""
         try:
@@ -2477,6 +2569,18 @@ class ControlPanel(ctk.CTk):
             overlay.mainloop()
         except Exception as e:
             print(f"Failed to open now playing overlay: {e}")
+
+    def open_text_scroller(self):
+        """Launch the text scroller in a separate window"""
+        try:
+            import tkinter as tk
+            from extras.text_scroller import TextScrollerApp
+
+            scroller_root = tk.Tk()
+            TextScrollerApp(scroller_root)
+            scroller_root.mainloop()
+        except Exception as e:
+            print(f"Failed to open text scroller: {e}")
 
     # ==================== IDLE ACTIONS TAB ====================
     def build_idle_tab(self):
@@ -2642,6 +2746,206 @@ class ControlPanel(ctk.CTk):
                 print("✓ Idle settings saved")
         except Exception as e:
             print(f"Failed to save idle settings: {e}")
+
+    # ==================== LAYA TAB ====================
+    def build_laya_tab(self):
+        """Build the Laya fast-lane pre-filter tab"""
+        title = ctk.CTkLabel(self.laya_tab, text="Laya Fast-Lane Pre-Filter", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+
+        info = ctk.CTkLabel(
+            self.laya_tab,
+            text="Laya classifies every chat message instantly, sends OSC body cues, "
+                 "and only forwards messages worth a reply to the LLM.",
+            font=ctk.CTkFont(size=12)
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+
+        scroll = ctk.CTkScrollableFrame(self.laya_tab)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Enable toggle
+        self.laya_enabled_var = ctk.BooleanVar(value=True)
+        enable_check = ctk.CTkCheckBox(scroll, text="Enable Laya Pre-Filter", variable=self.laya_enabled_var)
+        enable_check.pack(anchor="w", padx=10, pady=10)
+
+        # Start button
+        start_btn = ctk.CTkButton(scroll, text="Start Laya Server", command=self.start_laya_server)
+        start_btn.pack(anchor="w", padx=10, pady=10)
+
+        # Forward URL
+        url_label = ctk.CTkLabel(scroll, text="Forward URL (main server):", font=ctk.CTkFont(size=14))
+        url_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.laya_url_entry = ctk.CTkEntry(scroll)
+        self.laya_url_entry.pack(fill="x", padx=10, pady=5)
+
+        # OSC address
+        osc_label = ctk.CTkLabel(scroll, text="OSC Address (body cues):", font=ctk.CTkFont(size=14))
+        osc_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.laya_osc_entry = ctk.CTkEntry(scroll)
+        self.laya_osc_entry.pack(fill="x", padx=10, pady=5)
+
+        # Animation threshold
+        anim_label = ctk.CTkLabel(scroll, text="Animation Confidence Threshold:", font=ctk.CTkFont(size=14))
+        anim_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.laya_anim_slider = ctk.CTkSlider(scroll, from_=0.0, to=1.0, number_of_steps=20, command=self.update_laya_anim_label)
+        self.laya_anim_slider.pack(fill="x", padx=10, pady=(0, 5))
+        self.laya_anim_value = ctk.CTkLabel(scroll, text="0.75", font=ctk.CTkFont(size=12))
+        self.laya_anim_value.pack(anchor="e", padx=10)
+
+        # Reply threshold
+        reply_label = ctk.CTkLabel(scroll, text="Reply Gate Probability Threshold:", font=ctk.CTkFont(size=14))
+        reply_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.laya_reply_slider = ctk.CTkSlider(scroll, from_=0.0, to=1.0, number_of_steps=20, command=self.update_laya_reply_label)
+        self.laya_reply_slider.pack(fill="x", padx=10, pady=(0, 5))
+        self.laya_reply_value = ctk.CTkLabel(scroll, text="0.70", font=ctk.CTkFont(size=12))
+        self.laya_reply_value.pack(anchor="e", padx=10)
+
+        # Animation options
+        options_label = ctk.CTkLabel(scroll, text="Animation Options (comma separated):", font=ctk.CTkFont(size=14))
+        options_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.laya_options_entry = ctk.CTkEntry(scroll)
+        self.laya_options_entry.pack(fill="x", padx=10, pady=5)
+
+        # --- Animation -> OSC mapping section ---
+        map_label = ctk.CTkLabel(scroll, text="Animation → OSC Mapping", font=ctk.CTkFont(size=16, weight="bold"))
+        map_label.pack(anchor="w", padx=10, pady=(15, 5))
+
+        map_info = ctk.CTkLabel(
+            scroll,
+            text="Map an animation name to a specific OSC address + value. If not listed, "
+                 "falls back to the OSC address above + animation name.",
+            font=ctk.CTkFont(size=11), text_color="gray"
+        )
+        map_info.pack(anchor="w", padx=10, pady=(0, 5))
+
+        self.laya_map_frame = ctk.CTkScrollableFrame(scroll, height=150)
+        self.laya_map_frame.pack(fill="x", padx=10, pady=5)
+
+        add_map_btn = ctk.CTkButton(scroll, text="+ Add Animation Mapping", command=self.add_laya_map_row)
+        add_map_btn.pack(anchor="w", padx=10, pady=5)
+
+        # Save button
+        save_btn = ctk.CTkButton(scroll, text="Save Laya Settings", command=self.save_laya_settings)
+        save_btn.pack(pady=15)
+
+        self.load_laya_settings()
+
+    def update_laya_anim_label(self, value):
+        self.laya_anim_value.configure(text=f"{float(value):.2f}")
+
+    def update_laya_reply_label(self, value):
+        self.laya_reply_value.configure(text=f"{float(value):.2f}")
+
+    def start_laya_server(self):
+        """Launch the Laya server (start_scripts/start_laya.bat)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_laya.bat")
+        if self._launch_detached(bat_path):
+            print("Started Laya Server")
+
+    def add_laya_map_row(self, animation="", address="", value=""):
+        """Add a new animation→OSC mapping row."""
+        row = ctk.CTkFrame(self.laya_map_frame)
+        row.pack(fill="x", pady=3)
+
+        # Animation column
+        anim_col = ctk.CTkFrame(row, fg_color="transparent")
+        anim_col.pack(side="left", padx=5, pady=3)
+        anim_label = ctk.CTkLabel(anim_col, text="Animation", font=ctk.CTkFont(size=11), text_color="gray")
+        anim_label.pack(anchor="w")
+        anim_entry = ctk.CTkEntry(anim_col, width=130)
+        anim_entry.pack(anchor="w", pady=(2, 0))
+        if animation:
+            anim_entry.insert(0, animation)
+
+        # OSC Address column
+        addr_col = ctk.CTkFrame(row, fg_color="transparent")
+        addr_col.pack(side="left", padx=5, pady=3)
+        addr_label = ctk.CTkLabel(addr_col, text="OSC Address", font=ctk.CTkFont(size=11), text_color="gray")
+        addr_label.pack(anchor="w")
+        address_entry = ctk.CTkEntry(addr_col, width=160)
+        address_entry.pack(anchor="w", pady=(2, 0))
+        if address:
+            address_entry.insert(0, address)
+
+        # Value column
+        val_col = ctk.CTkFrame(row, fg_color="transparent")
+        val_col.pack(side="left", padx=5, pady=3)
+        val_label = ctk.CTkLabel(val_col, text="Value", font=ctk.CTkFont(size=11), text_color="gray")
+        val_label.pack(anchor="w")
+        value_entry = ctk.CTkEntry(val_col, width=110)
+        value_entry.pack(anchor="w", pady=(2, 0))
+        if value:
+            value_entry.insert(0, value)
+
+        delete_btn = ctk.CTkButton(row, text="✕", width=30, fg_color="red", hover_color="darkred", command=lambda: row.destroy())
+        delete_btn.pack(side="left", padx=5, pady=3)
+
+    def load_laya_settings(self):
+        """Load Laya settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/settings", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                self.laya_enabled_var.set(data.get('laya_enabled', True))
+                self.laya_url_entry.delete(0, "end")
+                self.laya_url_entry.insert(0, data.get('laya_url', 'http://127.0.0.1:5000/chat'))
+                self.laya_osc_entry.delete(0, "end")
+                self.laya_osc_entry.insert(0, data.get('laya_osc_address', '/avatar/command'))
+                self.laya_anim_slider.set(data.get('laya_animation_threshold', 0.75))
+                self.laya_reply_slider.set(data.get('laya_reply_threshold', 0.70))
+                options = data.get('laya_animation_options', [])
+                self.laya_options_entry.delete(0, "end")
+                self.laya_options_entry.insert(0, ", ".join(options))
+                for row in self.laya_map_frame.winfo_children():
+                    row.destroy()
+                for entry in data.get('laya_animation_map', []):
+                    self.add_laya_map_row(
+                        animation=entry.get('animation', ''),
+                        address=entry.get('address', ''),
+                        value=entry.get('value', '')
+                    )
+        except Exception as e:
+            print(f"Failed to load Laya settings: {e}")
+
+    def save_laya_settings(self):
+        """Save Laya settings to server"""
+        try:
+            options_text = self.laya_options_entry.get().strip()
+            options = [o.strip() for o in options_text.split(",") if o.strip()]
+
+            animation_map = []
+            for row in self.laya_map_frame.winfo_children():
+                entries = []
+                def _collect(widget):
+                    for child in widget.winfo_children():
+                        if isinstance(child, ctk.CTkEntry):
+                            entries.append(child)
+                        else:
+                            _collect(child)
+                _collect(row)
+                if len(entries) >= 3:
+                    animation = entries[0].get().strip()
+                    address = entries[1].get().strip()
+                    value = entries[2].get().strip()
+                    if animation:
+                        animation_map.append({"animation": animation, "address": address, "value": value})
+
+            payload = {
+                'laya_enabled': self.laya_enabled_var.get(),
+                'laya_url': self.laya_url_entry.get().strip(),
+                'laya_osc_address': self.laya_osc_entry.get().strip(),
+                'laya_animation_threshold': round(self.laya_anim_slider.get(), 2),
+                'laya_reply_threshold': round(self.laya_reply_slider.get(), 2),
+                'laya_animation_options': options,
+                'laya_animation_map': animation_map,
+            }
+
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("Laya settings saved")
+        except Exception as e:
+            print(f"Failed to save Laya settings: {e}")
 
     def on_close(self):
         """Clean up on window close"""

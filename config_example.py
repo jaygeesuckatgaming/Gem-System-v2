@@ -27,6 +27,7 @@ TTS_EMBEDDING_SCALE = 1.0
 TTS_ALPHA = 0.3
 TTS_BETA = 0.7
 TTS_REFERENCE_VOICE = ""  # Path to a reference voice .wav file
+TTS_COPY_TO = ""  # Network share to copy generated audio to (empty = disabled)
 
 # Pocket TTS
 POCKET_TTS_URL = "http://127.0.0.1:13301/tts"
@@ -102,6 +103,18 @@ IDLE_MONOLOGUE_PROMPT = (
 
 # Twitch Music Check (verify songs against Twitch DJ Program)
 TWITCH_MUSIC_CHECK_ENABLED = True
+
+# Laya Fast-Lane Pre-Filter (classifies chat + sends OSC body cues before the LLM)
+LAYA_ENABLED = True
+LAYA_URL = "http://127.0.0.1:5000/chat"   # Main server endpoint to forward approved messages to
+LAYA_ANIMATION_THRESHOLD = 0.75           # Confidence needed to send a non-idle OSC cue
+LAYA_REPLY_THRESHOLD = 0.70               # Probability needed to forward a message to the LLM
+LAYA_OSC_ADDRESS = "/avatar/command"      # OSC address for body cues
+LAYA_ANIMATION_OPTIONS = ["wave", "cheer", "lurk", "blush", "facepalm", "scared", "laugh", "glare", "mindblown", "idle"]
+# Per-animation OSC mapping (animation name -> specific OSC address + value).
+# Each entry: {"animation": "wave", "address": "/avatar/command", "value": "wave"}
+# If an animation is not listed, falls back to LAYA_OSC_ADDRESS + animation name.
+LAYA_ANIMATION_MAP = []
 
 # Voice input speaker name (used for memory storage of microphone input)
 VOICE_SPEAKER_NAME = "JayGee"
