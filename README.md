@@ -6,6 +6,8 @@
 
 **Pre requirements**
 </div>
+**Microsoft Visual C++ 14.0 or greater is required. Get it with "Microsoft C++ Build Tools": https://visualstudio.microsoft.com/visual-cpp-build-tools/
+
 **For sound routing install [Voicemeter Banana](https://vb-audio.com/Voicemeeter/banana.htm)**
 
 **For chat routing install [Social Stream Ninja](https://github.com/steveseguin/social_stream/releases)**
