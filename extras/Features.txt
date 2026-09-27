@@ -18,3 +18,7 @@ Features
 17. Can Read Chat
 18. NDI Computer Screen
 19. Multiple Camera angles
+20. Laya (Used As An "Emotion Engine")
+21. Can hear using Faster-Whisper
+22. Memory Using Cognee
+23. Music Requests

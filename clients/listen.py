@@ -20,11 +20,10 @@ import configparser
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-import torch
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from faster_whisper import WhisperModel
 from scipy.io.wavfile import read as read_wav
 
-# --- Configuration (static values) ---
+# --- Configuration (defaults; overridden from config.py at runtime) ---
 VAD_AGGRESSIVENESS = 1
 SAMPLE_RATE = 16000
 FRAME_DURATION_MS = 20
@@ -51,6 +50,8 @@ def load_settings_from_ini():
     sys.path.insert(0, project_root)
     import config as cfg
 
+    global VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_S, PRE_BUFFER_S
+
     settings = {}
     
     try:
@@ -59,6 +60,12 @@ def load_settings_from_ini():
         port = getattr(cfg, 'SERVER_PORT', 5000)
         settings['mcp_url'] = f"http://{host}:{port}/process"
         print(f"AUDIO INFO: MCP URL set to -> {settings['mcp_url']}")
+
+        # Load STT tuning values from config.py
+        settings['whisper_model'] = getattr(cfg, 'STT_WHISPER_MODEL', 'openai/whisper-base.en')
+        VAD_AGGRESSIVENESS = int(getattr(cfg, 'STT_VAD_AGGRESSIVENESS', 1))
+        SILENCE_THRESHOLD_S = float(getattr(cfg, 'STT_SILENCE_THRESHOLD_S', 2.0))
+        PRE_BUFFER_S = float(getattr(cfg, 'STT_PRE_BUFFER_S', 0.5))
 
         # Get the audio input device string from config.py
         device_string = getattr(cfg, 'AUDIO_INPUT_DEVICE', '')
@@ -119,9 +126,8 @@ def main():
     try:
         vad = webrtcvad.Vad(VAD_AGGRESSIVENESS); print("- VAD initialized.")
         print("- Loading Whisper model...")
-        model_name = "openai/whisper-base.en"
-        processor = WhisperProcessor.from_pretrained(model_name)
-        model = WhisperForConditionalGeneration.from_pretrained(model_name)
+        model_name = settings['whisper_model']
+        model = WhisperModel(model_name, device="auto", compute_type="int8")
         print("- Whisper loaded.")
     except Exception as e:
         sys.exit(f"An error occurred during initialization: {e}")
@@ -151,9 +157,8 @@ def main():
                             try:
                                 sr, audio_data = read_wav(WAV_FILE_NAME)
                                 audio_data = audio_data.astype(np.float32) / 32768.0
-                                input_features = processor(audio_data, sampling_rate=sr, return_tensors="pt").input_features
-                                predicted_ids = model.generate(input_features)
-                                transcribed_text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+                                segments, _info = model.transcribe(audio_data, language="en", beam_size=5)
+                                transcribed_text = " ".join(seg.text.strip() for seg in segments).strip()
                             except Exception as e:
                                 print(f"Whisper transcription error: {e}")
                                 transcribed_text = ""

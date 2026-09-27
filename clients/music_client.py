@@ -12,6 +12,9 @@ import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict, Callable
 
+import numpy as np
+import sounddevice as sd
+
 # Add music folder to path for imports
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MUSIC_DIR = os.path.join(PROJECT_ROOT, "music")
@@ -20,6 +23,119 @@ sys.path.insert(0, MUSIC_DIR)
 from song_library import SongLibrary
 from download_worker import run_download, is_youtube_url
 from twitch_music_checker import TwitchMusicChecker
+
+
+class _SDMusicPlayer:
+    """Plays audio via sounddevice, targeting a specific output device.
+    Supports loop, pause/resume, live volume, and position tracking.
+    Independent of pygame so music can use a different device than TTS."""
+
+    def __init__(self, device=None):
+        self.device = device
+        self._stream = None
+        self._data = None
+        self._sr = 0
+        self._loop = False
+        self._volume = 1.0
+        self._paused = False
+        self._idx = 0
+        self._frames_played = 0
+        self._lock = threading.Lock()
+
+    def _decode(self, filepath: str):
+        import librosa
+        data, sr = librosa.load(filepath, sr=None, mono=True)
+        return data.astype(np.float32), int(sr)
+
+    def _callback(self, outdata, frames, time_info, status):
+        if self._data is None or self._paused:
+            outdata[:] = 0.0
+            return
+        n = len(self._data)
+        vol = self._volume
+        if self._loop:
+            for i in range(frames):
+                outdata[i, 0] = self._data[self._idx % n] * vol
+                self._idx += 1
+        else:
+            end = self._idx + frames
+            if end < n:
+                outdata[:, 0] = self._data[self._idx:end] * vol
+                self._idx = end
+            else:
+                rem = n - self._idx
+                if rem > 0:
+                    outdata[:rem, 0] = self._data[self._idx:] * vol
+                outdata[rem:, 0] = 0.0
+                self._idx = n
+                raise sd.CallbackStop
+        self._frames_played += frames
+
+    def play(self, filepath: str, loop: bool = False, start_pos: float = 0.0):
+        self.stop()
+        data, sr = self._decode(filepath)
+        with self._lock:
+            self._data = data
+            self._sr = sr
+            self._loop = loop
+            self._paused = False
+            self._idx = int(start_pos * sr)
+            self._frames_played = self._idx
+        self._stream = sd.OutputStream(
+            samplerate=sr, channels=1, dtype='float32',
+            device=self.device, callback=self._callback
+        )
+        self._stream.start()
+
+    def is_playing(self) -> bool:
+        return self._stream is not None and self._stream.active
+
+    def pause(self):
+        self._paused = True
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+            except Exception:
+                pass
+
+    def resume(self):
+        self._paused = False
+        if self._stream is not None and not self._stream.active:
+            try:
+                self._stream.start()
+            except Exception:
+                pass
+
+    def set_volume(self, volume: float):
+        self._volume = max(0.0, min(1.0, volume))
+
+    def stop(self):
+        if self._stream is not None:
+            try:
+                self._stream.abort()
+            except Exception:
+                pass
+            self._stream = None
+        with self._lock:
+            self._data = None
+        self._paused = False
+
+    def get_position(self) -> float:
+        return self._frames_played / self._sr if self._sr else 0.0
+
+    def get_duration(self) -> float:
+        if self._data is None or not self._sr:
+            return 0.0
+        return len(self._data) / self._sr
+
+    def duration_of(self, filepath: str) -> float:
+        """Decode a file and return its duration in seconds (without playing)."""
+        import librosa
+        try:
+            y, sr = librosa.load(filepath, sr=None, mono=True)
+            return float(len(y)) / float(sr)
+        except Exception:
+            return 0.0
 
 
 class MusicClient:
@@ -44,6 +160,11 @@ class MusicClient:
         self._playlist_index = 0
 
         self.device_name = device_name
+        self.music_device_name: Optional[str] = None  # Separate music output (set by main.py)
+
+        # sounddevice-based player (independent of pygame so music can use its own device)
+        self._sd_player = None  # lazily created when a device is resolved
+        self._request_player = None  # separate player for request songs
         self.queue: List[str] = []
         self.current_download: Optional[str] = None
         self.download_history: List[str] = []
@@ -57,7 +178,6 @@ class MusicClient:
         self._request_queue: List[str] = []
         self._request_lock = threading.Lock()
         self._request_worker = None
-        self._request_channel = None
 
         # Twitch music checker
         self.twitch_checker = TwitchMusicChecker()
@@ -80,6 +200,64 @@ class MusicClient:
         self.enabled = True
         print(f"✓ Music system ready (library: {len(self.library.list_songs())} songs)")
         return True
+
+    def _resolve_device_name(self, device_string: str) -> Optional[str]:
+        """Resolve a '[ID] Name' or plain device string to an SDL-compatible name."""
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+            if ']' in device_string:
+                device_id = int(device_string.split(']')[0].strip('['))
+                for dev in devices:
+                    if dev['index'] == device_id and dev['max_output_channels'] > 0:
+                        return dev['name']
+                name_partial = device_string.split('] ', 1)[1]
+                for dev in devices:
+                    if dev['name'].startswith(name_partial[:20]) and dev['max_output_channels'] > 0:
+                        return dev['name']
+                return None
+            return device_string
+        except Exception as e:
+            print(f"Music device resolution error: {e}")
+            return device_string
+
+    def _get_music_device_id(self):
+        """Resolve the music output device to a sounddevice device index.
+        Returns None to use the system default."""
+        music_device = self.music_device_name or self.device_name
+        if not music_device:
+            return None
+        try:
+            devices = sd.query_devices()
+            if ']' in music_device:
+                device_id = int(music_device.split(']')[0].strip('['))
+                for dev in devices:
+                    if dev['index'] == device_id and dev['max_output_channels'] > 0:
+                        return dev['index']
+                return None
+            # Plain name -> match by name
+            for dev in devices:
+                if dev['name'] == music_device and dev['max_output_channels'] > 0:
+                    return dev['index']
+            for dev in devices:
+                if music_device in dev['name'] and dev['max_output_channels'] > 0:
+                    return dev['index']
+            return None
+        except Exception as e:
+            print(f"Music device resolution error: {e}")
+            return None
+
+    def _get_sd_player(self):
+        """Return (and lazily create) the sounddevice music player."""
+        if self._sd_player is None:
+            self._sd_player = _SDMusicPlayer(device=self._get_music_device_id())
+        return self._sd_player
+
+    def _get_request_player(self):
+        """Return (and lazily create) the sounddevice request-song player."""
+        if self._request_player is None:
+            self._request_player = _SDMusicPlayer(device=self._get_music_device_id())
+        return self._request_player
 
     def list_songs(self) -> List[str]:
         """List available karaoke songs"""
@@ -242,40 +420,28 @@ class MusicClient:
             print(f"✗ State file write error: {e}")
 
     def _play_mp3(self, filepath: str):
-        """Play a single MP3 file on a dedicated Sound channel (so the music
-        channel used by background/playlist is never clobbered)."""
+        """Play a single MP3 file via sounddevice (independent of pygame/TTS)."""
         try:
-            import pygame
-
             # Track what's playing so we can stop it later
             self.now_playing = os.path.basename(filepath)
             self._write_state_file(self.now_playing)
-
-            # Initialize mixer (reuse existing mixer if already initialized by AudioPlayer)
-            if not pygame.mixer.get_init():
-                pygame.init()
-                pygame.mixer.init()
-
-            if not pygame.mixer.get_init():
-                raise RuntimeError("Audio system not initialised")
 
             # Pause background music and playlist (preserves their position)
             self.pause_background_song()
             self.pause_playlist()
 
-            # Play the request on a dedicated channel, leaving mixer.music alone
-            request_sound = pygame.mixer.Sound(filepath)
-            request_channel = request_sound.play()
-            self._request_channel = request_channel
-            while request_channel.get_busy():
-                import time
+            # Play the request on a dedicated sounddevice player
+            player = self._get_request_player()
+            player.set_volume(1.0)
+            player.play(filepath, loop=False)
+            self._request_player = player
+            while player.is_playing():
                 if self._stop_requested:
-                    request_channel.stop()
+                    player.stop()
                     self._stop_requested = False
                     break
                 time.sleep(0.1)
 
-            self._request_channel = None
             self.now_playing = None
             self._write_state_file(None)
 
@@ -293,11 +459,12 @@ class MusicClient:
         """Stop the currently playing request song AND any playlist/background music."""
         stopped = False
         try:
-            import pygame
-            # Stop any request song playing on a Sound channel
+            # Stop any request song playing on a dedicated player
             if self._stop_requested or self.now_playing:
                 self._stop_requested = True
-            # Stop the playlist (music channel)
+            if self._request_player is not None:
+                self._request_player.stop()
+            # Stop the playlist
             if self._playlist_active:
                 self.stop_playlist()
                 stopped = True
@@ -305,11 +472,9 @@ class MusicClient:
             if self.background_song_path:
                 self.stop_background_song()
                 stopped = True
-            # Stop the music channel outright (covers playlist + background)
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
-                stopped = True
-            # Stop the request channel
+            # Stop the background/playlist player outright
+            if self._sd_player is not None:
+                self._sd_player.stop()
             self._stop_requested = True
             self.now_playing = None
             self._write_state_file(None)
@@ -342,14 +507,11 @@ class MusicClient:
         return True
 
     def _play_background_loop(self, filepath: str, start_pos: float = 0.0):
-        """Play background song in a loop using mixer.music (supports MP3)"""
+        """Play background song in a loop via sounddevice."""
         try:
-            import pygame
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-            pygame.mixer.music.load(filepath)
-            pygame.mixer.music.play(loops=-1, start=start_pos)
-            pygame.mixer.music.set_volume(self.background_volume)
+            player = self._get_sd_player()
+            player.set_volume(self.background_volume)
+            player.play(filepath, loop=True, start_pos=start_pos)
             print(f"🎵 Background music playing (looping) at volume {self.background_volume:.2f}")
         except Exception as e:
             print(f"✗ Background playback error: {e}")
@@ -357,63 +519,35 @@ class MusicClient:
     def duck_music(self, duck_amount: float = -15.0, attack_ms: int = 100, release_ms: int = 500):
         """Lower music volume (background/playlist AND request songs) when TTS speaks"""
         try:
-            import pygame
-            # Duck the request channel (dedicated Sound channel)
-            if self._request_channel is not None and self._request_channel.get_busy():
-                current_vol = self._request_channel.get_volume()
-                target_vol = max(0.0, current_vol * (10.0 ** (duck_amount / 20.0)))
-                self._request_channel.set_volume(target_vol)
-                print(f"🎵 Request song ducked to {target_vol:.2f}")
-
-            # Duck background/playlist (mixer.music channel)
-            if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
-                return
-            target_volume = max(0.0, self.background_volume * (10.0 ** (duck_amount / 20.0)))
-            current_volume = self.background_volume
-            steps = max(1, attack_ms // 20)
-            volume_step = (current_volume - target_volume) / steps
-            for i in range(steps):
-                new_vol = current_volume - (volume_step * (i + 1))
-                pygame.mixer.music.set_volume(max(0.0, new_vol))
-                time.sleep(0.02)
-            print(f"🎵 Music ducked to {target_volume:.2f} ({duck_amount}dB)")
+            target = max(0.0, self.background_volume * (10.0 ** (duck_amount / 20.0)))
+            # Duck the request player
+            if self._request_player is not None and self._request_player.is_playing():
+                self._request_player.set_volume(max(0.0, 1.0 * (10.0 ** (duck_amount / 20.0))))
+            # Duck the background/playlist player
+            if self._sd_player is not None and self._sd_player.is_playing():
+                self._sd_player.set_volume(target)
+                print(f"🎵 Music ducked to {target:.2f} ({duck_amount}dB)")
         except Exception as e:
             print(f"✗ Duck music error: {e}")
 
     def unduck_music(self, release_ms: int = 500):
         """Restore music volume (background/playlist AND request songs) after TTS"""
         try:
-            import pygame
-            # Restore the request channel volume
-            if self._request_channel is not None and self._request_channel.get_busy():
-                self._request_channel.set_volume(1.0)
-                print("🎵 Request song volume restored")
-
+            # Restore the request player volume
+            if self._request_player is not None and self._request_player.is_playing():
+                self._request_player.set_volume(1.0)
             # Restore background/playlist volume
-            if not pygame.mixer.get_init() or not pygame.mixer.music.get_busy():
-                return
-            target_volume = self.background_volume
-            current_volume = pygame.mixer.music.get_volume()
-            steps = max(1, release_ms // 20)
-            volume_step = (target_volume - current_volume) / steps
-            for i in range(steps):
-                new_vol = current_volume + (volume_step * (i + 1))
-                pygame.mixer.music.set_volume(min(1.0, max(0.0, new_vol)))
-                time.sleep(0.02)
-            pygame.mixer.music.set_volume(target_volume)
-            print(f"🎵 Music volume restored to {target_volume:.2f}")
+            if self._sd_player is not None and self._sd_player.is_playing():
+                self._sd_player.set_volume(self.background_volume)
+                print(f"🎵 Music volume restored to {self.background_volume:.2f}")
         except Exception as e:
             print(f"✗ Unduck music error: {e}")
 
     def pause_background_song(self) -> bool:
         """Pause the background song (if playing)"""
         try:
-            import pygame
-            mixer_init = pygame.mixer.get_init()
-            music_busy = pygame.mixer.music.get_busy() if mixer_init else False
-            print(f"DEBUG pause: mixer_init={mixer_init}, music_busy={music_busy}, bg_path={self.background_song_path}")
-            if mixer_init and music_busy:
-                pygame.mixer.music.pause()
+            if self._sd_player is not None and self._sd_player.is_playing():
+                self._sd_player.pause()
                 self.background_song_paused = True
                 print("🎵 Background music paused")
                 return True
@@ -424,9 +558,9 @@ class MusicClient:
     def resume_background_song(self) -> bool:
         """Resume the background song (if it was paused)"""
         try:
-            import pygame
             if self.background_song_paused:
-                pygame.mixer.music.unpause()
+                if self._sd_player is not None:
+                    self._sd_player.resume()
                 self.background_song_paused = False
                 print("🎵 Background music resumed")
                 return True
@@ -435,17 +569,14 @@ class MusicClient:
         return False
 
     def restart_background_song(self) -> bool:
-        """Restart the background song from the beginning (reloads it into the mixer)."""
+        """Restart the background song from the beginning (reloads it)."""
         try:
-            import pygame
             if not self.background_song_path or not os.path.exists(self.background_song_path):
                 print("⚠️ No background song set to resume")
                 return False
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
-            pygame.mixer.music.load(self.background_song_path)
-            pygame.mixer.music.play(loops=-1)
-            pygame.mixer.music.set_volume(self.background_volume)
+            player = self._get_sd_player()
+            player.set_volume(self.background_volume)
+            player.play(self.background_song_path, loop=True)
             self.background_song_paused = False
             print(f"🎵 Background music restarted: {os.path.basename(self.background_song_path)}")
             return True
@@ -456,9 +587,8 @@ class MusicClient:
     def stop_background_song(self) -> bool:
         """Stop the background song"""
         try:
-            import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
+            if self._sd_player is not None:
+                self._sd_player.stop()
             self.background_song_path = None
             self.background_song_paused = False
             print("🎵 Background music stopped")
@@ -496,9 +626,8 @@ class MusicClient:
     def _play_playlist_loop(self, songs: List[str]):
         """Play each song in the playlist sequentially, then loop."""
         try:
-            import pygame
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
+            player = self._get_sd_player()
+            player.set_volume(self.background_volume)
 
             self._playlist_active = True
             self._playlist_paused = False
@@ -511,21 +640,19 @@ class MusicClient:
                     filepath = os.path.join(self.playlist_folder, song)
                     self.now_playing = song
                     self._write_state_file(song)
-                    pygame.mixer.music.load(filepath)
-                    pygame.mixer.music.play()
-                    pygame.mixer.music.set_volume(self.background_volume)
+                    player.play(filepath, loop=False)
                     print(f"🎵 Playlist now playing: {song}")
-                    while pygame.mixer.music.get_busy():
+                    while player.is_playing():
                         if not self._playlist_active:
-                            pygame.mixer.music.stop()
+                            player.stop()
                             return
                         if self._playlist_paused:
-                            pygame.mixer.music.pause()
+                            player.pause()
                             while self._playlist_paused and self._playlist_active:
                                 time.sleep(0.1)
                             if not self._playlist_active:
                                 return
-                            pygame.mixer.music.unpause()
+                            player.resume()
                         time.sleep(0.1)
                 # Loop back to the start
         except Exception as e:
@@ -542,9 +669,8 @@ class MusicClient:
             return False
         self._playlist_paused = True
         try:
-            import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.pause()
+            if self._sd_player is not None and self._sd_player.is_playing():
+                self._sd_player.pause()
         except Exception:
             pass
         print("🎵 Playlist paused")
@@ -563,9 +689,8 @@ class MusicClient:
         self._playlist_active = False
         self._playlist_paused = False
         try:
-            import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                pygame.mixer.music.stop()
+            if self._sd_player is not None:
+                self._sd_player.stop()
         except Exception:
             pass
         self.now_playing = None
@@ -576,9 +701,8 @@ class MusicClient:
     def get_background_position(self) -> float:
         """Get current playback position in seconds"""
         try:
-            import pygame
-            if pygame.mixer.get_init() and pygame.mixer.music.get_busy():
-                return pygame.mixer.music.get_pos() / 1000.0
+            if self._sd_player is not None and self._sd_player.is_playing():
+                return self._sd_player.get_position()
         except Exception:
             pass
         return 0.0
@@ -639,12 +763,12 @@ class MusicClient:
     def get_background_duration(self) -> float:
         """Get total duration of the current background song in seconds (cached)"""
         try:
-            import pygame
-            if self.background_song_path and pygame.mixer.get_init():
-                # Cache the duration to avoid reloading the MP3 every poll
+            if self.background_song_path:
                 if getattr(self, '_cached_duration_path', None) != self.background_song_path:
-                    sound = pygame.mixer.Sound(self.background_song_path)
-                    self._cached_duration = sound.get_length()
+                    if self._sd_player is not None:
+                        self._sd_player.stop()
+                    dur = self._get_sd_player().duration_of(self.background_song_path)
+                    self._cached_duration = dur
                     self._cached_duration_path = self.background_song_path
                 return self._cached_duration
         except Exception:
@@ -654,15 +778,14 @@ class MusicClient:
     def set_background_volume(self, volume: float) -> bool:
         """Set background music volume (0.0 to 1.0)"""
         try:
-            import pygame
             volume = max(0.0, min(1.0, volume))
             self.background_volume = volume
-            if pygame.mixer.get_init():
-                pygame.mixer.music.set_volume(volume)
-                return True
+            if self._sd_player is not None and self._sd_player.is_playing():
+                self._sd_player.set_volume(volume)
+            return True
         except Exception as e:
             print(f"✗ Set volume error: {e}")
-        return False
+            return False
 
     def get_download_status(self) -> Dict:
         """Get current download status"""

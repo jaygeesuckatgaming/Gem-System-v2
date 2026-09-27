@@ -36,6 +36,7 @@ def _tts_url_for_engine():
 tts = TTSClient(tts_url=_tts_url_for_engine())
 music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 music.background_volume = getattr(config, 'BACKGROUND_VOLUME', 0.5)
+music.music_device_name = getattr(config, 'MUSIC_OUTPUT_DEVICE', '') or None
 
 # Wire the LLM into the Twitch music checker so it can parse song requests
 music.twitch_checker.llm_parse_function = llm.chat_sync
@@ -71,8 +72,45 @@ async def send_response(response: str):
     """Send a response to TTS and (optionally) to chat."""
     if config.TTS_ENABLED:
         await tts.speak(response)
+        # Duck AFTER synthesis, so the music stays up during synthesis latency
+        # and only ducks once the voice is actually ready to play.
+        speech_seconds = _get_tts_wav_seconds()
+        if speech_seconds <= 0:
+            speech_seconds = _estimate_speech_seconds(response)
+        if speech_seconds > 0:
+            delay = getattr(config, 'AUDIO_DUCK_DELAY_S', 0.0)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            _duck_music()
+            await asyncio.sleep(speech_seconds)
+            # Hold the duck a bit longer to account for network/watcher latency
+            hold = getattr(config, 'AUDIO_DUCK_HOLD_S', 0.0)
+            if hold > 0:
+                await asyncio.sleep(hold)
+            _unduck_music()
     if config.SEND_RESPONSES_TO_CHAT:
         await ssn.send_message(response, targets=config.SSN_TARGETS)
+
+
+def _estimate_speech_seconds(text: str) -> float:
+    """Rough estimate of speech duration in seconds (~150 words/min)."""
+    words = len(text.split())
+    if words == 0:
+        return 0.0
+    return words / 2.5  # ~150 wpm
+
+
+def _get_tts_wav_seconds() -> float:
+    """Return the duration (seconds) of the last TTS output wav, if present."""
+    try:
+        import soundfile as sf
+        path = os.path.join(os.path.dirname(__file__), config.TTS_OUTPUT_PATH)
+        if os.path.exists(path):
+            info = sf.info(path)
+            return float(info.frames) / float(info.samplerate)
+    except Exception:
+        pass
+    return 0.0
 
 
 async def _idle_monologue(topic: str):
@@ -197,11 +235,18 @@ def save_config():
             'TTS_OUTPUT_PATH': (config.TTS_OUTPUT_PATH, True),
             'AUDIO_PLAYER_ENABLED': (config.AUDIO_PLAYER_ENABLED, False),
             'AUDIO_OUTPUT_DEVICE': (config.AUDIO_OUTPUT_DEVICE, True),
+            'MUSIC_OUTPUT_DEVICE': (config.MUSIC_OUTPUT_DEVICE, True),
             'AUDIO_INPUT_DEVICE': (config.AUDIO_INPUT_DEVICE, True),
             'AUDIO_DUCKING_ENABLED': (config.AUDIO_DUCKING_ENABLED, False),
             'AUDIO_DUCK_AMOUNT': (config.AUDIO_DUCK_AMOUNT, False),
             'AUDIO_DUCK_ATTACK_MS': (config.AUDIO_DUCK_ATTACK_MS, False),
             'AUDIO_DUCK_RELEASE_MS': (config.AUDIO_DUCK_RELEASE_MS, False),
+            'AUDIO_DUCK_DELAY_S': (config.AUDIO_DUCK_DELAY_S, False),
+            'AUDIO_DUCK_HOLD_S': (config.AUDIO_DUCK_HOLD_S, False),
+            'STT_WHISPER_MODEL': (config.STT_WHISPER_MODEL, True),
+            'STT_VAD_AGGRESSIVENESS': (config.STT_VAD_AGGRESSIVENESS, False),
+            'STT_SILENCE_THRESHOLD_S': (config.STT_SILENCE_THRESHOLD_S, False),
+            'STT_PRE_BUFFER_S': (config.STT_PRE_BUFFER_S, False),
             'BACKGROUND_VOLUME': (config.BACKGROUND_VOLUME, False),
             'BLENDSHAPE_MOUTH_SCALE': (config.BLENDSHAPE_MOUTH_SCALE, False),
             'BLENDSHAPE_EYE_SCALE': (config.BLENDSHAPE_EYE_SCALE, False),
@@ -245,12 +290,21 @@ def save_config():
 
         for key, (value, is_string) in settings.items():
             if is_string:
-                new_value = f'"{value}"'
+                new_value = repr(str(value))
             else:
                 new_value = str(value)
-            # Replace the assignment line
+            # Replace the assignment line (function replacement avoids escape interpretation)
             pattern = re.compile(rf'^{key}\s*=\s*.*$', re.MULTILINE)
-            content = pattern.sub(f'{key} = {new_value}', content)
+            content = pattern.sub(lambda m, kv=f'{key} = {new_value}': kv, content)
+
+        # Persist SYSTEM_PROMPT (multiline triple-quoted string, handled separately)
+        # Use a function replacement so backslashes in the value aren't interpreted as escapes.
+        prompt_literal = repr(config.SYSTEM_PROMPT)
+        prompt_pattern = re.compile(r'^SYSTEM_PROMPT\s*=\s*""".*?"""\s*$', re.MULTILINE | re.DOTALL)
+        if prompt_pattern.search(content):
+            content = prompt_pattern.sub(lambda m: f'SYSTEM_PROMPT = {prompt_literal}', content)
+        else:
+            content += f'\nSYSTEM_PROMPT = {prompt_literal}\n'
 
         # Persist OSC_ACTIONS (a list of dicts, handled separately)
         import pprint
@@ -1008,10 +1062,19 @@ async def api_status():
         },
         'audio': {
             'output_device': config.AUDIO_OUTPUT_DEVICE,
+            'music_output_device': config.MUSIC_OUTPUT_DEVICE,
             'ducking_enabled': config.AUDIO_DUCKING_ENABLED,
             'duck_amount': config.AUDIO_DUCK_AMOUNT,
             'attack_ms': config.AUDIO_DUCK_ATTACK_MS,
-            'release_ms': config.AUDIO_DUCK_RELEASE_MS
+            'release_ms': config.AUDIO_DUCK_RELEASE_MS,
+            'duck_delay_s': config.AUDIO_DUCK_DELAY_S,
+            'duck_hold_s': config.AUDIO_DUCK_HOLD_S
+        },
+        'stt': {
+            'whisper_model': config.STT_WHISPER_MODEL,
+            'vad_aggressiveness': config.STT_VAD_AGGRESSIVENESS,
+            'silence_threshold_s': config.STT_SILENCE_THRESHOLD_S,
+            'pre_buffer_s': config.STT_PRE_BUFFER_S
         },
         'neurosync': {
             'mouth_scale': config.BLENDSHAPE_MOUTH_SCALE,
@@ -1185,6 +1248,9 @@ async def api_update_settings():
     if 'audio_output_device' in data:
         config.AUDIO_OUTPUT_DEVICE = data['audio_output_device']
         audio_player.device_name = data['audio_output_device'] or None
+    if 'music_output_device' in data:
+        config.MUSIC_OUTPUT_DEVICE = data['music_output_device']
+        music.music_device_name = data['music_output_device'] or None
     if 'audio_ducking_enabled' in data:
         config.AUDIO_DUCKING_ENABLED = data['audio_ducking_enabled']
     if 'audio_duck_amount' in data:
@@ -1193,8 +1259,20 @@ async def api_update_settings():
         config.AUDIO_DUCK_ATTACK_MS = data['audio_duck_attack_ms']
     if 'audio_duck_release_ms' in data:
         config.AUDIO_DUCK_RELEASE_MS = data['audio_duck_release_ms']
+    if 'audio_duck_delay_s' in data:
+        config.AUDIO_DUCK_DELAY_S = data['audio_duck_delay_s']
+    if 'audio_duck_hold_s' in data:
+        config.AUDIO_DUCK_HOLD_S = data['audio_duck_hold_s']
     if 'tts_output_path' in data:
         config.TTS_OUTPUT_PATH = data['tts_output_path']
+    if 'stt_whisper_model' in data:
+        config.STT_WHISPER_MODEL = data['stt_whisper_model']
+    if 'stt_vad_aggressiveness' in data:
+        config.STT_VAD_AGGRESSIVENESS = data['stt_vad_aggressiveness']
+    if 'stt_silence_threshold_s' in data:
+        config.STT_SILENCE_THRESHOLD_S = data['stt_silence_threshold_s']
+    if 'stt_pre_buffer_s' in data:
+        config.STT_PRE_BUFFER_S = data['stt_pre_buffer_s']
     if 'blendshape_mouth_scale' in data:
         config.BLENDSHAPE_MOUTH_SCALE = data['blendshape_mouth_scale']
     if 'blendshape_eye_scale' in data:

@@ -37,12 +37,21 @@ AUDIO_PLAYER_ENABLED = True
 TTS_OUTPUT_PATH = "tts_output/server_output.wav"
 AUDIO_OUTPUT_DEVICE = ""  # Empty = system default
 AUDIO_INPUT_DEVICE = ""   # Empty = not set
+MUSIC_OUTPUT_DEVICE = ""  # Separate output device for music (empty = use AUDIO_OUTPUT_DEVICE)
 
 # Audio Ducking (lower music volume when TTS speaks)
 AUDIO_DUCKING_ENABLED = False
 AUDIO_DUCK_AMOUNT = -15
 AUDIO_DUCK_ATTACK_MS = 100
 AUDIO_DUCK_RELEASE_MS = 500
+AUDIO_DUCK_DELAY_S = 0.5   # Delay (seconds) after synthesis before ducking, to align with playback start
+AUDIO_DUCK_HOLD_S = 1.0    # Extra time (seconds) to keep music ducked after speech ends
+
+# STT (Speech-to-Text / microphone listener)
+STT_WHISPER_MODEL = "base.en"
+STT_VAD_AGGRESSIVENESS = 1
+STT_SILENCE_THRESHOLD_S = 2.0
+STT_PRE_BUFFER_S = 0.5
 
 # Background music / playlist volume (0.0 - 1.0)
 BACKGROUND_VOLUME = 0.5

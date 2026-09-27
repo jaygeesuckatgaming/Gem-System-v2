@@ -61,6 +61,7 @@ class ControlPanel(ctk.CTk):
         self.extras_tab = self.tabview.add("Extras")
         self.idle_tab = self.tabview.add("Idle Actions")
         self.laya_tab = self.tabview.add("Laya")
+        self.stt_tab = self.tabview.add("STT")
         
         self.build_status_tab()
         self.build_llm_tab()
@@ -76,6 +77,7 @@ class ControlPanel(ctk.CTk):
         self.build_extras_tab()
         self.build_idle_tab()
         self.build_laya_tab()
+        self.build_stt_tab()
         
         # Auto-start the MCP server so the panel can populate settings
         self.start_mcp_server()
@@ -204,43 +206,46 @@ class ControlPanel(ctk.CTk):
     # ==================== LLM TAB ====================
     def build_llm_tab(self):
         """Build the LLM tab"""
-        title = ctk.CTkLabel(self.llm_tab, text="LLM Configuration", font=ctk.CTkFont(size=20, weight="bold"))
+        scroll = ctk.CTkScrollableFrame(self.llm_tab)
+        scroll.pack(fill="both", expand=True, padx=5, pady=5)
+
+        title = ctk.CTkLabel(scroll, text="LLM Configuration", font=ctk.CTkFont(size=20, weight="bold"))
         title.pack(pady=20)
         
         # Connection status
-        self.llm_status = ctk.CTkLabel(self.llm_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.llm_status = ctk.CTkLabel(scroll, text="Status: Checking...", font=ctk.CTkFont(size=16))
         self.llm_status.pack(anchor="w", padx=20, pady=5)
         
         # Model
-        model_label = ctk.CTkLabel(self.llm_tab, text="Ollama Model:", font=ctk.CTkFont(size=14))
+        model_label = ctk.CTkLabel(scroll, text="Ollama Model:", font=ctk.CTkFont(size=14))
         model_label.pack(anchor="w", padx=20, pady=(20, 0))
         
-        self.model_entry = ctk.CTkEntry(self.llm_tab)
+        self.model_entry = ctk.CTkEntry(scroll)
         self.model_entry.pack(fill="x", padx=20, pady=10)
         
         # System prompt
-        prompt_label = ctk.CTkLabel(self.llm_tab, text="System Prompt:", font=ctk.CTkFont(size=14))
+        prompt_label = ctk.CTkLabel(scroll, text="System Prompt:", font=ctk.CTkFont(size=14))
         prompt_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        self.prompt_textbox = ctk.CTkTextbox(self.llm_tab, height=200)
+        self.prompt_textbox = ctk.CTkTextbox(scroll, height=200)
         self.prompt_textbox.pack(fill="x", padx=20, pady=10)
         
         # Wake words
-        wake_label = ctk.CTkLabel(self.llm_tab, text="Wake Words (comma separated):", font=ctk.CTkFont(size=14))
+        wake_label = ctk.CTkLabel(scroll, text="Wake Words (comma separated):", font=ctk.CTkFont(size=14))
         wake_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        self.wake_entry = ctk.CTkEntry(self.llm_tab)
+        self.wake_entry = ctk.CTkEntry(scroll)
         self.wake_entry.pack(fill="x", padx=20, pady=10)
         
         # Voice speaker name
-        speaker_label = ctk.CTkLabel(self.llm_tab, text="Voice Speaker Name (for memory):", font=ctk.CTkFont(size=14))
+        speaker_label = ctk.CTkLabel(scroll, text="Voice Speaker Name (for memory):", font=ctk.CTkFont(size=14))
         speaker_label.pack(anchor="w", padx=20, pady=(10, 0))
         
-        self.speaker_entry = ctk.CTkEntry(self.llm_tab)
+        self.speaker_entry = ctk.CTkEntry(scroll)
         self.speaker_entry.pack(fill="x", padx=20, pady=10)
         
         # Save button
-        save_btn = ctk.CTkButton(self.llm_tab, text="Save LLM Settings", command=self.save_llm_settings)
+        save_btn = ctk.CTkButton(scroll, text="Save LLM Settings", command=self.save_llm_settings)
         save_btn.pack(pady=20)
     
     # ==================== MEMORY TAB ====================
@@ -508,6 +513,7 @@ class ControlPanel(ctk.CTk):
         """Build the Audio settings tab"""
         self._current_device = ""
         self._current_input_device = ""
+        self._current_music_device = ""
         self._is_testing_output = False
         self._is_monitoring_input = False
         self._input_stream = None
@@ -553,7 +559,26 @@ class ControlPanel(ctk.CTk):
         
         self.output_vu_canvas = ctk.CTkCanvas(scroll_frame, height=30, bg="#1a1a1a", highlightthickness=0)
         self.output_vu_canvas.pack(fill="x", pady=(0, 15))
-        
+
+        # --- Music Output Device (separate, for Voicemeeter VOD splitting) ---
+        music_device_section = ctk.CTkLabel(scroll_frame, text="Music Output Device", font=ctk.CTkFont(size=16, weight="bold"))
+        music_device_section.pack(anchor="w", pady=(5, 10))
+
+        music_device_label = ctk.CTkLabel(scroll_frame, text="Music Output Device (leave empty to use Audio Output):", font=ctk.CTkFont(size=13))
+        music_device_label.pack(anchor="w")
+
+        self.music_device_combo = ctk.CTkComboBox(scroll_frame, values=["System Default"], width=400)
+        self.music_device_combo.pack(fill="x", pady=(0, 5))
+
+        music_device_btn_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+        music_device_btn_frame.pack(fill="x", pady=(0, 5))
+
+        refresh_music_device_btn = ctk.CTkButton(music_device_btn_frame, text="Refresh Music Devices", width=180, command=self.refresh_music_devices)
+        refresh_music_device_btn.pack(side="left", padx=(0, 10))
+
+        save_music_device_btn = ctk.CTkButton(music_device_btn_frame, text="Save Music Device", width=150, command=self.save_music_device)
+        save_music_device_btn.pack(side="left")
+
         # --- Input Device (for listener) ---
         input_section = ctk.CTkLabel(scroll_frame, text="Input Device (Listener)", font=ctk.CTkFont(size=16, weight="bold"))
         input_section.pack(anchor="w", pady=(5, 10))
@@ -614,6 +639,22 @@ class ControlPanel(ctk.CTk):
         self.release_slider.pack(fill="x", pady=(0, 5))
         self.release_value = ctk.CTkLabel(scroll_frame, text="500 ms", font=ctk.CTkFont(size=12))
         self.release_value.pack(anchor="e")
+
+        # Duck delay (offset before ducking, to align with playback start)
+        delay_label = ctk.CTkLabel(scroll_frame, text="Duck Delay (seconds):", font=ctk.CTkFont(size=13))
+        delay_label.pack(anchor="w", pady=(10, 0))
+        self.duck_delay_slider = ctk.CTkSlider(scroll_frame, from_=0.0, to=10.0, number_of_steps=100, command=self.update_duck_delay_label)
+        self.duck_delay_slider.pack(fill="x", pady=(0, 5))
+        self.duck_delay_value = ctk.CTkLabel(scroll_frame, text="0.5 s", font=ctk.CTkFont(size=12))
+        self.duck_delay_value.pack(anchor="e")
+
+        # Duck hold (extra time to keep music ducked after speech ends)
+        hold_label = ctk.CTkLabel(scroll_frame, text="Duck Hold (seconds):", font=ctk.CTkFont(size=13))
+        hold_label.pack(anchor="w", pady=(10, 0))
+        self.duck_hold_slider = ctk.CTkSlider(scroll_frame, from_=0.0, to=10.0, number_of_steps=100, command=self.update_duck_hold_label)
+        self.duck_hold_slider.pack(fill="x", pady=(0, 5))
+        self.duck_hold_value = ctk.CTkLabel(scroll_frame, text="1.0 s", font=ctk.CTkFont(size=12))
+        self.duck_hold_value.pack(anchor="e")
         
         # Save button
         save_btn = ctk.CTkButton(scroll_frame, text="Save Audio Settings", command=self.save_audio_settings)
@@ -630,6 +671,12 @@ class ControlPanel(ctk.CTk):
     
     def update_release_label(self, value):
         self.release_value.configure(text=f"{int(value)} ms")
+
+    def update_duck_delay_label(self, value):
+        self.duck_delay_value.configure(text=f"{float(value):.1f} s")
+
+    def update_duck_hold_label(self, value):
+        self.duck_hold_value.configure(text=f"{float(value):.1f} s")
     
     def refresh_audio_devices(self):
         """Fetch available audio output devices"""
@@ -660,6 +707,43 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to fetch audio devices: {e}")
     
+    def refresh_music_devices(self):
+        """Fetch available audio output devices for the music dropdown."""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/audio/devices", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                devices = data.get('devices', [])
+                device_names = ["System Default"]
+                for dev in devices:
+                    device_names.append(f"[{dev['index']}] {dev['name']}")
+                self.music_device_combo.configure(values=device_names)
+                current = self._current_music_device
+                matched = False
+                if current and current != "System Default" and '[' in current:
+                    current_id = current.split(']')[0].strip('[')
+                    for name in device_names:
+                        if name.startswith(f"[{current_id}]"):
+                            self.music_device_combo.set(name)
+                            matched = True
+                            break
+                if not matched:
+                    self.music_device_combo.set("System Default")
+        except Exception as e:
+            print(f"Failed to fetch music devices: {e}")
+
+    def save_music_device(self):
+        """Save the selected music output device."""
+        selected = self.music_device_combo.get()
+        device_string = "" if selected == "System Default" else selected
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/settings", json={"music_output_device": device_string}, timeout=5)
+            if response.status_code == 200:
+                self._current_music_device = device_string
+                print(f"✓ Music output device saved: {device_string}")
+        except Exception as e:
+            print(f"Failed to save music device: {e}")
+
     def refresh_input_devices(self):
         """Fetch available audio input devices"""
         try:
@@ -714,6 +798,7 @@ class ControlPanel(ctk.CTk):
                 audio = data.get('audio', {})
                 
                 self._current_device = audio.get('output_device', '')
+                self._current_music_device = audio.get('music_output_device', '')
                 
                 self.ducking_enabled_var.set(audio.get('ducking_enabled', False))
                 
@@ -725,6 +810,12 @@ class ControlPanel(ctk.CTk):
                 
                 self.release_slider.set(audio.get('release_ms', 500))
                 self.release_value.configure(text=f"{audio.get('release_ms', 500)} ms")
+
+                self.duck_delay_slider.set(audio.get('duck_delay_s', 0.5))
+                self.duck_delay_value.configure(text=f"{audio.get('duck_delay_s', 0.5):.1f} s")
+
+                self.duck_hold_slider.set(audio.get('duck_hold_s', 1.0))
+                self.duck_hold_value.configure(text=f"{audio.get('duck_hold_s', 1.0):.1f} s")
         except Exception as e:
             print(f"Failed to load audio settings: {e}")
         
@@ -739,6 +830,8 @@ class ControlPanel(ctk.CTk):
         
         # Refresh input devices
         self.refresh_input_devices()
+        # Refresh music devices
+        self.refresh_music_devices()
     
     def save_audio_settings(self):
         """Save audio settings to server"""
@@ -754,7 +847,9 @@ class ControlPanel(ctk.CTk):
                 'audio_ducking_enabled': self.ducking_enabled_var.get(),
                 'audio_duck_amount': int(self.duck_amount_slider.get()),
                 'audio_duck_attack_ms': int(self.attack_slider.get()),
-                'audio_duck_release_ms': int(self.release_slider.get())
+                'audio_duck_release_ms': int(self.release_slider.get()),
+                'audio_duck_delay_s': round(self.duck_delay_slider.get(), 1),
+                'audio_duck_hold_s': round(self.duck_hold_slider.get(), 1)
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
@@ -1622,7 +1717,24 @@ class ControlPanel(ctk.CTk):
             font=ctk.CTkFont(size=12)
         )
         info.pack(anchor="w", padx=20, pady=(0, 10))
-        
+
+        # OSC target (IP / port)
+        osc_target_frame = ctk.CTkFrame(self.osc_tab)
+        osc_target_frame.pack(fill="x", padx=20, pady=(0, 10))
+
+        ip_label = ctk.CTkLabel(osc_target_frame, text="IP:", font=ctk.CTkFont(size=13))
+        ip_label.pack(side="left", padx=(10, 5), pady=10)
+        self.osc_tab_ip_entry = ctk.CTkEntry(osc_target_frame, width=130)
+        self.osc_tab_ip_entry.pack(side="left", padx=5, pady=10)
+
+        port_label = ctk.CTkLabel(osc_target_frame, text="Port:", font=ctk.CTkFont(size=13))
+        port_label.pack(side="left", padx=(10, 5), pady=10)
+        self.osc_tab_port_entry = ctk.CTkEntry(osc_target_frame, width=70)
+        self.osc_tab_port_entry.pack(side="left", padx=5, pady=10)
+
+        save_target_btn = ctk.CTkButton(osc_target_frame, text="Save IP/Port", width=100, command=self.save_osc_target)
+        save_target_btn.pack(side="left", padx=10, pady=10)
+
         # Scrollable frame for actions list
         self.osc_actions_frame = ctk.CTkScrollableFrame(self.osc_tab)
         self.osc_actions_frame.pack(fill="both", expand=True, padx=20, pady=10)
@@ -1634,6 +1746,19 @@ class ControlPanel(ctk.CTk):
         # Save button
         save_btn = ctk.CTkButton(self.osc_tab, text="Save Actions", command=self.save_osc_actions)
         save_btn.pack(pady=10)
+
+    def save_osc_target(self):
+        """Save the OSC IP/port target to the server."""
+        try:
+            payload = {
+                'osc_ip': self.osc_tab_ip_entry.get().strip(),
+                'osc_port': int(self.osc_tab_port_entry.get().strip() or 10000)
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ OSC IP/Port saved")
+        except Exception as e:
+            print(f"Failed to save OSC IP/Port: {e}")
     
     def add_osc_action_row(self, phrase="", address="", value=""):
         """Add a new OSC action row"""
@@ -1684,6 +1809,9 @@ class ControlPanel(ctk.CTk):
             if response.status_code == 200:
                 data = response.json()
                 actions = data.get('actions', [])
+                # Clear existing rows first to avoid duplicates on reload
+                for row in self.osc_actions_frame.winfo_children():
+                    row.destroy()
                 for action in actions:
                     self.add_osc_action_row(
                         phrase=action.get('phrase', ''),
@@ -1692,6 +1820,18 @@ class ControlPanel(ctk.CTk):
                     )
         except Exception as e:
             print(f"Failed to load OSC actions: {e}")
+
+        # Load the OSC IP/port target into the OSC tab fields
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                osc = response.json().get('neurosync', {}).get('osc', {})
+                self.osc_tab_ip_entry.delete(0, "end")
+                self.osc_tab_ip_entry.insert(0, osc.get('ip', '127.0.0.1'))
+                self.osc_tab_port_entry.delete(0, "end")
+                self.osc_tab_port_entry.insert(0, str(osc.get('port', 10000)))
+        except Exception as e:
+            print(f"Failed to load OSC IP/port: {e}")
     
     def save_osc_actions(self):
         """Save OSC actions to server"""
@@ -2168,6 +2308,7 @@ class ControlPanel(ctk.CTk):
         self.load_osc_actions()
         self.load_idle_settings()
         self.load_laya_settings()
+        self.load_stt_settings()
         self.refresh_music_library()
         self.refresh_music_queue()
         self.refresh_background_songs()
@@ -2673,9 +2814,6 @@ class ControlPanel(ctk.CTk):
         save_btn = ctk.CTkButton(scroll, text="Save Idle Settings", command=self.save_idle_settings)
         save_btn.pack(pady=15)
 
-        # Load current settings
-        self.load_idle_settings()
-
     def load_idle_settings(self):
         """Load idle settings from server"""
         try:
@@ -2829,8 +2967,6 @@ class ControlPanel(ctk.CTk):
         save_btn = ctk.CTkButton(scroll, text="Save Laya Settings", command=self.save_laya_settings)
         save_btn.pack(pady=15)
 
-        self.load_laya_settings()
-
     def update_laya_anim_label(self, value):
         self.laya_anim_value.configure(text=f"{float(value):.2f}")
 
@@ -2946,6 +3082,91 @@ class ControlPanel(ctk.CTk):
                 print("Laya settings saved")
         except Exception as e:
             print(f"Failed to save Laya settings: {e}")
+
+    # ==================== STT TAB ====================
+    def build_stt_tab(self):
+        """Build the Speech-to-Text (microphone listener) tab"""
+        title = ctk.CTkLabel(self.stt_tab, text="Speech-to-Text (STT)", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+
+        info = ctk.CTkLabel(
+            self.stt_tab,
+            text="Listens to your microphone, transcribes speech with Whisper, and sends it to the MCP.",
+            font=ctk.CTkFont(size=12)
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+
+        scroll = ctk.CTkScrollableFrame(self.stt_tab)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Start button
+        start_btn = ctk.CTkButton(scroll, text="Start STT Listener", command=self.start_listener)
+        start_btn.pack(anchor="w", padx=10, pady=10)
+
+        # Whisper model
+        model_label = ctk.CTkLabel(scroll, text="Whisper Model:", font=ctk.CTkFont(size=14))
+        model_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.stt_model_entry = ctk.CTkEntry(scroll)
+        self.stt_model_entry.pack(fill="x", padx=10, pady=5)
+
+        # VAD aggressiveness
+        vad_label = ctk.CTkLabel(scroll, text="VAD Aggressiveness (0-3):", font=ctk.CTkFont(size=14))
+        vad_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.stt_vad_slider = ctk.CTkSlider(scroll, from_=0, to=3, number_of_steps=3, command=self.update_stt_vad_label)
+        self.stt_vad_slider.pack(fill="x", padx=10, pady=(0, 5))
+        self.stt_vad_value = ctk.CTkLabel(scroll, text="1", font=ctk.CTkFont(size=12))
+        self.stt_vad_value.pack(anchor="e", padx=10)
+
+        # Silence threshold
+        silence_label = ctk.CTkLabel(scroll, text="Silence Threshold (seconds):", font=ctk.CTkFont(size=14))
+        silence_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.stt_silence_entry = ctk.CTkEntry(scroll)
+        self.stt_silence_entry.pack(fill="x", padx=10, pady=5)
+
+        # Pre-buffer
+        prebuf_label = ctk.CTkLabel(scroll, text="Pre-buffer (seconds):", font=ctk.CTkFont(size=14))
+        prebuf_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.stt_prebuf_entry = ctk.CTkEntry(scroll)
+        self.stt_prebuf_entry.pack(fill="x", padx=10, pady=5)
+
+        # Save button
+        save_btn = ctk.CTkButton(scroll, text="Save STT Settings", command=self.save_stt_settings)
+        save_btn.pack(pady=15)
+
+    def update_stt_vad_label(self, value):
+        self.stt_vad_value.configure(text=str(int(value)))
+
+    def load_stt_settings(self):
+        """Load STT settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json().get('stt', {})
+                self.stt_model_entry.delete(0, "end")
+                self.stt_model_entry.insert(0, data.get('whisper_model', 'openai/whisper-base.en'))
+                self.stt_vad_slider.set(data.get('vad_aggressiveness', 1))
+                self.stt_vad_value.configure(text=str(data.get('vad_aggressiveness', 1)))
+                self.stt_silence_entry.delete(0, "end")
+                self.stt_silence_entry.insert(0, str(data.get('silence_threshold_s', 2.0)))
+                self.stt_prebuf_entry.delete(0, "end")
+                self.stt_prebuf_entry.insert(0, str(data.get('pre_buffer_s', 0.5)))
+        except Exception as e:
+            print(f"Failed to load STT settings: {e}")
+
+    def save_stt_settings(self):
+        """Save STT settings to server"""
+        try:
+            payload = {
+                'stt_whisper_model': self.stt_model_entry.get().strip(),
+                'stt_vad_aggressiveness': int(self.stt_vad_slider.get()),
+                'stt_silence_threshold_s': float(self.stt_silence_entry.get().strip() or 2.0),
+                'stt_pre_buffer_s': float(self.stt_prebuf_entry.get().strip() or 0.5),
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("STT settings saved")
+        except Exception as e:
+            print(f"Failed to save STT settings: {e}")
 
     def on_close(self):
         """Clean up on window close"""
