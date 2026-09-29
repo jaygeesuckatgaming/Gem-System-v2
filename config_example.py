@@ -15,7 +15,7 @@ SSN_TARGETS = ["discord", "twitch", "youtube"]
 # Cognee Memory
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
 
-# TTS Engine Selection: "styletts2" or "pocket"
+# TTS Engine Selection: "styletts2", "pocket", or "vibevoice"
 TTS_ENGINE = "styletts2"
 
 # StyleTTS2
@@ -31,6 +31,13 @@ TTS_COPY_TO = ""  # Network share to copy generated audio to (empty = disabled)
 
 # Pocket TTS
 POCKET_TTS_URL = "http://127.0.0.1:13301/tts"
+
+# VibeVoice
+VIBEVOICE_TTS_URL = "http://127.0.0.1:13000/tts"
+VIBEVOICE_MODEL = "microsoft/VibeVoice-1.5B"
+VIBEVOICE_INFERENCE_STEPS = 5
+VIBEVOICE_NUM_SPEAKERS = 1
+VIBEVOICE_CFG_SCALE = 1.3
 
 # Audio Player (plays TTS output when not using Neurosync)
 AUDIO_PLAYER_ENABLED = True
@@ -81,6 +88,15 @@ LIVELINK_PORT = 11111
 # Custom OSC actions (phrase -> OSC address + value)
 # Each action: {"phrase": "turn off light 1", "address": "/light/1", "value": "off"}
 OSC_ACTIONS = []
+
+# Avatar pose/state system: the LLM can change its physical state via [ACTION: X] tags.
+# The base pose is "sitting" (idle); the rest mirror the OSC custom action values.
+AVATAR_BASE_POSE = "sitting"
+AVATAR_ACTION_TAG_ENABLED = True   # Parse [ACTION: x] tags from LLM responses
+# Talking animation: sent via OSC when the avatar starts/stops speaking
+AVATAR_TALK_ANIMATION = "play_talking_animation"
+AVATAR_TALK_OSC_ADDRESS = "/chat/message"
+AVATAR_TALK_STOP_ANIMATION = "idle"   # OSC value sent when the avatar finishes speaking
 
 # Idle Actions (autonomous behavior when chat goes quiet)
 IDLE_ACTIONS_ENABLED = True

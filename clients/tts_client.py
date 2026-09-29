@@ -36,7 +36,8 @@ class TTSClient:
             return False
 
         try:
-            payload = {"chatmessage": clean_text}
+            # Send both 'chatmessage' and 'text' so any engine (StyleTTS2, Pocket, VibeVoice) works
+            payload = {"chatmessage": clean_text, "text": clean_text}
             print(f"TTS: Synthesizing '{clean_text[:60]}...'")
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.tts_url, json=payload)

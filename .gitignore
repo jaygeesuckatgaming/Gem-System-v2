@@ -30,6 +30,9 @@ tts/StyleTTS2/
 # Pocket TTS (separate git repo)
 tts/pocket-tts/
 
+# VibeVoice (separate git repo)
+tts/VibeVoice/
+
 # Reference voice audio files (large binaries)
 tts/reference_voices/*.wav
 

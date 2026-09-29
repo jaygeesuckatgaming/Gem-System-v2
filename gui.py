@@ -371,6 +371,9 @@ class ControlPanel(ctk.CTk):
         pocket_radio = ctk.CTkRadioButton(engine_frame, text="Pocket TTS", variable=self.tts_engine_var, value="pocket", command=self.on_engine_change)
         pocket_radio.pack(side="left", padx=10, pady=10)
         
+        vibevoice_radio = ctk.CTkRadioButton(engine_frame, text="VibeVoice", variable=self.tts_engine_var, value="vibevoice", command=self.on_engine_change)
+        vibevoice_radio.pack(side="left", padx=10, pady=10)
+        
         # Start server buttons
         start_frame = ctk.CTkFrame(scroll)
         start_frame.pack(fill="x", padx=20, pady=5)
@@ -378,6 +381,8 @@ class ControlPanel(ctk.CTk):
         start_styletts_btn.pack(side="left", padx=10, pady=10)
         start_pocket_btn = ctk.CTkButton(start_frame, text="Start Pocket TTS", command=self.start_pockettts)
         start_pocket_btn.pack(side="left", padx=10, pady=10)
+        start_vibevoice_btn = ctk.CTkButton(start_frame, text="Start VibeVoice", command=self.start_vibevoice)
+        start_vibevoice_btn.pack(side="left", padx=10, pady=10)
         
         # Enable toggle
         self.tts_enabled_var = ctk.BooleanVar(value=False)
@@ -407,6 +412,13 @@ class ControlPanel(ctk.CTk):
         
         self.pocket_tts_url_entry = ctk.CTkEntry(scroll)
         self.pocket_tts_url_entry.pack(fill="x", padx=20, pady=10)
+
+        # VibeVoice URL
+        vibevoice_url_label = ctk.CTkLabel(scroll, text="VibeVoice URL:", font=ctk.CTkFont(size=14))
+        vibevoice_url_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        self.vibevoice_tts_url_entry = ctk.CTkEntry(scroll)
+        self.vibevoice_tts_url_entry.pack(fill="x", padx=20, pady=10)
         
         # Pocket TTS device selection
         pocket_device_label = ctk.CTkLabel(scroll, text="Pocket TTS Device:", font=ctk.CTkFont(size=14))
@@ -421,7 +433,21 @@ class ControlPanel(ctk.CTk):
         
         gpu_radio = ctk.CTkRadioButton(pocket_device_frame, text="GPU (CUDA)", variable=self.pocket_device_var, value="cuda", command=self.save_pocket_device)
         gpu_radio.pack(side="left", padx=10, pady=10)
-        
+
+        # VibeVoice model
+        vibevoice_model_label = ctk.CTkLabel(scroll, text="VibeVoice Model:", font=ctk.CTkFont(size=14))
+        vibevoice_model_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.vibevoice_model_entry = ctk.CTkEntry(scroll)
+        self.vibevoice_model_entry.pack(fill="x", padx=20, pady=10)
+
+        # VibeVoice inference steps
+        vibevoice_steps_label = ctk.CTkLabel(scroll, text="VibeVoice Inference Steps (lower = faster):", font=ctk.CTkFont(size=14))
+        vibevoice_steps_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.vibevoice_steps_slider = ctk.CTkSlider(scroll, from_=1, to=20, number_of_steps=19, command=self.update_vibevoice_steps_label)
+        self.vibevoice_steps_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.vibevoice_steps_value = ctk.CTkLabel(scroll, text="5", font=ctk.CTkFont(size=12))
+        self.vibevoice_steps_value.pack(anchor="e", padx=20)
+
         # Save button (top, always visible)
         save_btn = ctk.CTkButton(scroll, text="Save TTS Settings", command=self.save_tts_settings)
         save_btn.pack(pady=10)
@@ -677,6 +703,9 @@ class ControlPanel(ctk.CTk):
 
     def update_duck_hold_label(self, value):
         self.duck_hold_value.configure(text=f"{float(value):.1f} s")
+
+    def update_vibevoice_steps_label(self, value):
+        self.vibevoice_steps_value.configure(text=str(int(value)))
     
     def refresh_audio_devices(self):
         """Fetch available audio output devices"""
@@ -2489,6 +2518,12 @@ class ControlPanel(ctk.CTk):
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_pockettts.bat")
         if self._launch_detached(bat_path):
             print("✓ Started Pocket TTS Server")
+
+    def start_vibevoice(self):
+        """Launch the VibeVoice server"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_vibevoice.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started VibeVoice Server")
     
     def save_pocket_device(self):
         """Save Pocket TTS device selection to settings.ini"""
@@ -2525,6 +2560,15 @@ class ControlPanel(ctk.CTk):
                 
                 self.pocket_tts_url_entry.delete(0, "end")
                 self.pocket_tts_url_entry.insert(0, tts.get('pocket_tts_url', 'http://127.0.0.1:13301/tts'))
+
+                self.vibevoice_tts_url_entry.delete(0, "end")
+                self.vibevoice_tts_url_entry.insert(0, tts.get('vibevoice_tts_url', 'http://127.0.0.1:13000/tts'))
+
+                self.vibevoice_model_entry.delete(0, "end")
+                self.vibevoice_model_entry.insert(0, tts.get('vibevoice_model', 'microsoft/VibeVoice-1.5B'))
+
+                self.vibevoice_steps_slider.set(tts.get('vibevoice_inference_steps', 5))
+                self.vibevoice_steps_value.configure(text=str(tts.get('vibevoice_inference_steps', 5)))
                 
                 self.tts_engine_var.set(tts.get('engine', 'styletts2'))
                 
@@ -2574,6 +2618,9 @@ class ControlPanel(ctk.CTk):
                 'tts_engine': self.tts_engine_var.get(),
                 'tts_url': self.tts_url_entry.get().strip(),
                 'pocket_tts_url': self.pocket_tts_url_entry.get().strip(),
+                'vibevoice_tts_url': self.vibevoice_tts_url_entry.get().strip(),
+                'vibevoice_model': self.vibevoice_model_entry.get().strip(),
+                'vibevoice_inference_steps': int(self.vibevoice_steps_slider.get()),
                 'tts_diffusion_steps': int(self.diffusion_steps_slider.get()),
                 'tts_embedding_scale': round(self.embedding_scale_slider.get(), 1),
                 'tts_alpha': round(self.alpha_slider.get(), 2),

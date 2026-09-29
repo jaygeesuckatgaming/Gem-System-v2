@@ -31,6 +31,8 @@ cognee = CogneeClient(server_url=config.COGNEE_SERVER_URL)
 def _tts_url_for_engine():
     if config.TTS_ENGINE == "pocket":
         return config.POCKET_TTS_URL
+    if config.TTS_ENGINE == "vibevoice":
+        return config.VIBEVOICE_TTS_URL
     return config.TTS_URL
 
 tts = TTSClient(tts_url=_tts_url_for_engine())
@@ -71,6 +73,10 @@ idle.send_osc = _idle_send_osc
 async def send_response(response: str):
     """Send a response to TTS and (optionally) to chat."""
     if config.TTS_ENABLED:
+        talk_anim = getattr(config, 'AVATAR_TALK_ANIMATION', '')
+        talk_addr = getattr(config, 'AVATAR_TALK_OSC_ADDRESS', config.OSC_ADDRESS)
+        stop_anim = getattr(config, 'AVATAR_TALK_STOP_ANIMATION', '')
+
         await tts.speak(response)
         # Duck AFTER synthesis, so the music stays up during synthesis latency
         # and only ducks once the voice is actually ready to play.
@@ -81,13 +87,24 @@ async def send_response(response: str):
             delay = getattr(config, 'AUDIO_DUCK_DELAY_S', 0.0)
             if delay > 0:
                 await asyncio.sleep(delay)
+
+            # Send the "talking" animation, aligned with the duck (actual playback start)
+            if talk_anim:
+                send_osc_message(talk_addr, talk_anim)
+
             _duck_music()
             await asyncio.sleep(speech_seconds)
+
+            # Send the "stop talking" animation as soon as speech ends (before the hold)
+            if stop_anim:
+                send_osc_message(talk_addr, stop_anim)
+
             # Hold the duck a bit longer to account for network/watcher latency
             hold = getattr(config, 'AUDIO_DUCK_HOLD_S', 0.0)
             if hold > 0:
                 await asyncio.sleep(hold)
             _unduck_music()
+
     if config.SEND_RESPONSES_TO_CHAT:
         await ssn.send_message(response, targets=config.SSN_TARGETS)
 
@@ -165,6 +182,9 @@ _last_ai_responses = deque(maxlen=10)
 # Pause flag: when True, the MCP ignores incoming chat (acts as a mute/standby)
 _paused = False
 
+# Current avatar pose (base is "sitting"). The LLM can change this via [ACTION: x] tags.
+current_pose = config.AVATAR_BASE_POSE
+
 # Rolling chat history so the LLM has context of the recent conversation
 _recent_chat = deque(maxlen=20)
 
@@ -226,6 +246,9 @@ def save_config():
             'SEND_RESPONSES_TO_CHAT': (config.SEND_RESPONSES_TO_CHAT, False),
             'TTS_URL': (config.TTS_URL, True),
             'POCKET_TTS_URL': (config.POCKET_TTS_URL, True),
+            'VIBEVOICE_TTS_URL': (config.VIBEVOICE_TTS_URL, True),
+            'VIBEVOICE_MODEL': (config.VIBEVOICE_MODEL, True),
+            'VIBEVOICE_INFERENCE_STEPS': (config.VIBEVOICE_INFERENCE_STEPS, False),
             'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
             'TTS_EMBEDDING_SCALE': (config.TTS_EMBEDDING_SCALE, False),
             'TTS_ALPHA': (config.TTS_ALPHA, False),
@@ -911,6 +934,18 @@ async def handle_incoming_message(data: dict):
     now = datetime.now(ZoneInfo("Asia/Bangkok"))
     system_prompt = f"{system_prompt}\n\nToday is {now.strftime('%A, %B %d, %Y')}. The current time is {now.strftime('%I:%M %p')}."
     
+    # Inject the avatar's current physical state and available actions
+    if config.AVATAR_ACTION_TAG_ENABLED:
+        state_context = get_avatar_state_context()
+        actions_list = get_avatar_action_list()
+        system_prompt = (
+            f"{system_prompt}\n\n{state_context}\n"
+            f"You may change your physical state by starting your reply with a tag like "
+            f"[ACTION: <action>]. Available actions: {actions_list}. "
+            f"Only use an action tag when you actually want to change your pose or "
+            f"perform a physical action (e.g. the user invited you to dance, wave, etc.)."
+        )
+    
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
     
@@ -921,6 +956,13 @@ async def handle_incoming_message(data: dict):
     
     response = await llm.chat(llm_message, system_prompt=system_prompt)
     print(f"[GEM] {response}")
+    
+    # Parse any [ACTION: x] tag from the response and act on it
+    if config.AVATAR_ACTION_TAG_ENABLED:
+        action, cleaned_response = parse_action_tag(response)
+        if action:
+            apply_action_tag(action)
+            response = cleaned_response or response
     
     # Store AI response in memory
     await cognee.remember("Gem", response)
@@ -1047,10 +1089,13 @@ async def api_status():
             'server_url': config.COGNEE_SERVER_URL
         },
         'tts': {
-            'enabled': tts.enabled,
+            'enabled': config.TTS_ENABLED,
             'engine': config.TTS_ENGINE,
             'tts_url': config.TTS_URL,
             'pocket_tts_url': config.POCKET_TTS_URL,
+            'vibevoice_tts_url': config.VIBEVOICE_TTS_URL,
+            'vibevoice_model': config.VIBEVOICE_MODEL,
+            'vibevoice_inference_steps': config.VIBEVOICE_INFERENCE_STEPS,
             'diffusion_steps': config.TTS_DIFFUSION_STEPS,
             'embedding_scale': config.TTS_EMBEDDING_SCALE,
             'alpha': config.TTS_ALPHA,
@@ -1225,12 +1270,20 @@ async def api_update_settings():
         await tts.check_connection()
     if 'tts_url' in data:
         config.TTS_URL = data['tts_url']
-        if config.TTS_ENGINE != "pocket":
+        if config.TTS_ENGINE not in ("pocket", "vibevoice"):
             tts.tts_url = data['tts_url']
     if 'pocket_tts_url' in data:
         config.POCKET_TTS_URL = data['pocket_tts_url']
         if config.TTS_ENGINE == "pocket":
             tts.tts_url = data['pocket_tts_url']
+    if 'vibevoice_tts_url' in data:
+        config.VIBEVOICE_TTS_URL = data['vibevoice_tts_url']
+        if config.TTS_ENGINE == "vibevoice":
+            tts.tts_url = data['vibevoice_tts_url']
+    if 'vibevoice_model' in data:
+        config.VIBEVOICE_MODEL = data['vibevoice_model']
+    if 'vibevoice_inference_steps' in data:
+        config.VIBEVOICE_INFERENCE_STEPS = data['vibevoice_inference_steps']
     if 'tts_diffusion_steps' in data:
         config.TTS_DIFFUSION_STEPS = data['tts_diffusion_steps']
     if 'tts_embedding_scale' in data:
@@ -1473,6 +1526,65 @@ def match_osc_action(text: str):
         if phrase and phrase in text_lower:
             return action
     return None
+
+
+def get_avatar_action_list() -> str:
+    """Return a comma-separated list of actions the avatar can perform, for the system prompt."""
+    actions = [config.AVATAR_BASE_POSE]
+    for action in config.OSC_ACTIONS:
+        value = action.get('value', '')
+        if value and value not in actions:
+            actions.append(value)
+    return ", ".join(actions)
+
+
+def get_avatar_state_context() -> str:
+    """Return the avatar's current physical state for injection into the system prompt."""
+    global current_pose
+    return f"[Gem's current physical state: {current_pose}]"
+
+
+def parse_action_tag(text: str):
+    """Extract an [ACTION: x] or [x] tag from an LLM response.
+    Returns (action, cleaned_text) or (None, original_text)."""
+    import re
+    patterns = [
+        r'^\[ACTION\s*:\s*([^\]]+)\]\s*',
+        r'^\[([A-Za-z0-9 _-]+)\]\s*',
+    ]
+    for pattern in patterns:
+        m = re.match(pattern, text.strip())
+        if m:
+            action = m.group(1).strip().lower()
+            cleaned = text[m.end():].strip()
+            return action, cleaned
+    return None, text
+
+
+def apply_action_tag(action: str) -> bool:
+    """Send the OSC command for an action and update the current pose.
+    Returns True if the action was recognized and sent."""
+    global current_pose
+
+    action_lower = action.lower()
+
+    # If it's the base pose, just update state (no OSC needed)
+    if action_lower in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
+        current_pose = action_lower
+        print(f"[AVATAR] Pose set to: {current_pose}")
+        return True
+
+    # Look up the matching OSC action by value
+    for osc_action in config.OSC_ACTIONS:
+        if osc_action.get('value', '').lower() == action_lower:
+            send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
+            current_pose = action_lower
+            print(f"[AVATAR] Action '{action_lower}' sent via OSC, pose updated.")
+            return True
+
+    # No match — leave pose unchanged
+    print(f"[AVATAR] Unrecognized action '{action}', ignoring.")
+    return False
 
 
 @app.route('/api/recall', methods=['POST'])
