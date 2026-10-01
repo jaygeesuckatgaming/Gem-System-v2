@@ -70,6 +70,29 @@ def _idle_send_osc(address: str, value: str):
 idle.send_osc = _idle_send_osc
 
 
+def resume_current_pose():
+    """Send the OSC command to return the avatar to its current pose after speaking.
+    If the pose is the base 'sitting', send the stop/idle animation instead."""
+    global current_pose
+    stop_anim = getattr(config, 'AVATAR_TALK_STOP_ANIMATION', 'idle')
+    talk_addr = getattr(config, 'AVATAR_TALK_OSC_ADDRESS', config.OSC_ADDRESS)
+
+    pose = current_pose
+    # If the pose is a base/idle state, fall back to the stop animation
+    if pose in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
+        send_osc_message(talk_addr, stop_anim)
+        return
+
+    # Otherwise re-send the current pose's OSC command (e.g. resume dancing)
+    for osc_action in config.OSC_ACTIONS:
+        if osc_action.get('value', '').lower() == pose.lower():
+            send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
+            return
+
+    # Unknown pose — fall back to idle
+    send_osc_message(talk_addr, stop_anim)
+
+
 async def send_response(response: str):
     """Send a response to TTS and (optionally) to chat."""
     if config.TTS_ENABLED:
@@ -88,16 +111,17 @@ async def send_response(response: str):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            # Send the "talking" animation, aligned with the duck (actual playback start)
-            if talk_anim:
+            # Send the "talking" animation, aligned with the duck (actual playback start).
+            # Only when in the base/idle pose — if she's dancing (or any active pose),
+            # leave her animation alone so she keeps dancing while talking.
+            if talk_anim and current_pose in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
                 send_osc_message(talk_addr, talk_anim)
 
             _duck_music()
             await asyncio.sleep(speech_seconds)
 
-            # Send the "stop talking" animation as soon as speech ends (before the hold)
-            if stop_anim:
-                send_osc_message(talk_addr, stop_anim)
+            # Return to the current pose (resume dancing, etc.) instead of always going idle
+            resume_current_pose()
 
             # Hold the duck a bit longer to account for network/watcher latency
             hold = getattr(config, 'AUDIO_DUCK_HOLD_S', 0.0)
@@ -849,6 +873,9 @@ async def handle_incoming_message(data: dict):
         address = osc_action.get('address', config.OSC_ADDRESS)
         value = osc_action.get('value', '')
         send_osc_message(address, value)
+        # Update the avatar's current pose so talking doesn't reset it to idle
+        global current_pose
+        current_pose = value
         await cognee.remember(speaker, message)
         # Let the LLM come up with a natural in-character comment
         response = await llm.chat(

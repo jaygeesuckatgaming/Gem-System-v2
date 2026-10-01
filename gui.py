@@ -434,6 +434,16 @@ class ControlPanel(ctk.CTk):
         gpu_radio = ctk.CTkRadioButton(pocket_device_frame, text="GPU (CUDA)", variable=self.pocket_device_var, value="cuda", command=self.save_pocket_device)
         gpu_radio.pack(side="left", padx=10, pady=10)
 
+        # Pocket TTS speech speed
+        pocket_speed_label = ctk.CTkLabel(scroll, text="Pocket TTS Speech Speed:", font=ctk.CTkFont(size=14))
+        pocket_speed_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.pocket_speed_slider = ctk.CTkSlider(scroll, from_=0.5, to=2.0, number_of_steps=30, command=self.update_pocket_speed_label)
+        self.pocket_speed_slider.pack(fill="x", padx=20, pady=(0, 5))
+        self.pocket_speed_value = ctk.CTkLabel(scroll, text="1.0x", font=ctk.CTkFont(size=12))
+        self.pocket_speed_value.pack(anchor="e", padx=20)
+        pocket_speed_save_btn = ctk.CTkButton(scroll, text="Save Speed", width=100, command=self.save_pocket_speed)
+        pocket_speed_save_btn.pack(anchor="w", padx=20, pady=(0, 10))
+
         # VibeVoice model
         vibevoice_model_label = ctk.CTkLabel(scroll, text="VibeVoice Model:", font=ctk.CTkFont(size=14))
         vibevoice_model_label.pack(anchor="w", padx=20, pady=(10, 0))
@@ -706,6 +716,25 @@ class ControlPanel(ctk.CTk):
 
     def update_vibevoice_steps_label(self, value):
         self.vibevoice_steps_value.configure(text=str(int(value)))
+
+    def update_pocket_speed_label(self, value):
+        self.pocket_speed_value.configure(text=f"{float(value):.2f}x")
+
+    def save_pocket_speed(self):
+        """Save Pocket TTS speech speed to settings.ini"""
+        try:
+            import configparser
+            settings_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts", "pocket-tts", "settings.ini")
+            cfg = configparser.ConfigParser()
+            cfg.read(settings_path)
+            if not cfg.has_section('TTS'):
+                cfg.add_section('TTS')
+            cfg.set('TTS', 'speed', f"{round(self.pocket_speed_slider.get(), 2)}")
+            with open(settings_path, 'w') as f:
+                cfg.write(f)
+            print(f"✓ Pocket TTS speed set to: {round(self.pocket_speed_slider.get(), 2)}")
+        except Exception as e:
+            print(f"Failed to save Pocket TTS speed: {e}")
     
     def refresh_audio_devices(self):
         """Fetch available audio output devices"""
@@ -2580,6 +2609,9 @@ class ControlPanel(ctk.CTk):
                     cfg.read(settings_path)
                     device = cfg.get('TTS', 'device', fallback='cpu')
                     self.pocket_device_var.set(device)
+                    speed = cfg.getfloat('TTS', 'speed', fallback=1.0)
+                    self.pocket_speed_slider.set(speed)
+                    self.pocket_speed_value.configure(text=f"{speed:.2f}x")
                 except Exception:
                     self.pocket_device_var.set('cpu')
                 
