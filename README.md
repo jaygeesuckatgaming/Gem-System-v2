@@ -2,7 +2,7 @@
 
 # Gem-System-v2
 
-**Windows Installation:**
+**Windows Installation:** (NOT COMPLETE IN ANYWAY.....)
 
 **Pre requirements**
 </div>
