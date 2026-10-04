@@ -59,6 +59,10 @@ Neurosync/NeuroSync_Player/
 # Runtime state files
 background_state.json
 now_playing_state.txt
+current_pose.txt
+
+# Qwen3-TTS (separate git repo)
+tts/Qwen3-TTS/
 
 # OS
 .DS_Store

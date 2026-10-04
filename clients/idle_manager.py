@@ -78,6 +78,9 @@ class IdleManager:
                 print(f"[IdleManager] Interrupt callback error: {e}")
 
     def _osc(self, address: str, value: str):
+        # Skip empty values (nothing configured) so we don't send blank commands
+        if not value:
+            return
         if self.send_osc:
             try:
                 self.send_osc(address, value)

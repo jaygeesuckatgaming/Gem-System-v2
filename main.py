@@ -33,6 +33,8 @@ def _tts_url_for_engine():
         return config.POCKET_TTS_URL
     if config.TTS_ENGINE == "vibevoice":
         return config.VIBEVOICE_TTS_URL
+    if config.TTS_ENGINE == "qwen":
+        return config.QWEN_TTS_URL
     return config.TTS_URL
 
 tts = TTSClient(tts_url=_tts_url_for_engine())
@@ -65,41 +67,41 @@ idle = IdleManager(
     topics=config.IDLE_TOPICS,
 )
 def _idle_send_osc(address: str, value: str):
-    send_osc_message(address, value)
+    # Only send OSC if a value is actually set (empty = skip, to avoid sending
+    # blank commands that break other animations).
+    if value:
+        send_osc_message(address, value)
 
 idle.send_osc = _idle_send_osc
 
 
 def resume_current_pose():
     """Send the OSC command to return the avatar to its current pose after speaking.
-    If the pose is the base 'sitting', send the stop/idle animation instead."""
+    If the pose is the base 'sitting', send the stop/idle animation instead.
+    NOTE: The talking animation is now handled by watcher_to_face (which owns
+    actual playback timing). This function is only used for explicit pose changes."""
     global current_pose
     stop_anim = getattr(config, 'AVATAR_TALK_STOP_ANIMATION', 'idle')
     talk_addr = getattr(config, 'AVATAR_TALK_OSC_ADDRESS', config.OSC_ADDRESS)
 
     pose = current_pose
-    # If the pose is a base/idle state, fall back to the stop animation
     if pose in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
         send_osc_message(talk_addr, stop_anim)
         return
 
-    # Otherwise re-send the current pose's OSC command (e.g. resume dancing)
+    # Re-send the current pose's OSC command (e.g. resume dancing)
     for osc_action in config.OSC_ACTIONS:
         if osc_action.get('value', '').lower() == pose.lower():
             send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
             return
 
-    # Unknown pose — fall back to idle
     send_osc_message(talk_addr, stop_anim)
 
 
 async def send_response(response: str):
-    """Send a response to TTS and (optionally) to chat."""
+    """Send a response to TTS and (optionally) to chat.
+    The talking animation is driven by watcher_to_face (actual playback timing)."""
     if config.TTS_ENABLED:
-        talk_anim = getattr(config, 'AVATAR_TALK_ANIMATION', '')
-        talk_addr = getattr(config, 'AVATAR_TALK_OSC_ADDRESS', config.OSC_ADDRESS)
-        stop_anim = getattr(config, 'AVATAR_TALK_STOP_ANIMATION', '')
-
         await tts.speak(response)
         # Duck AFTER synthesis, so the music stays up during synthesis latency
         # and only ducks once the voice is actually ready to play.
@@ -111,17 +113,8 @@ async def send_response(response: str):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            # Send the "talking" animation, aligned with the duck (actual playback start).
-            # Only when in the base/idle pose — if she's dancing (or any active pose),
-            # leave her animation alone so she keeps dancing while talking.
-            if talk_anim and current_pose in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
-                send_osc_message(talk_addr, talk_anim)
-
             _duck_music()
             await asyncio.sleep(speech_seconds)
-
-            # Return to the current pose (resume dancing, etc.) instead of always going idle
-            resume_current_pose()
 
             # Hold the duck a bit longer to account for network/watcher latency
             hold = getattr(config, 'AUDIO_DUCK_HOLD_S', 0.0)
@@ -271,6 +264,7 @@ def save_config():
             'TTS_URL': (config.TTS_URL, True),
             'POCKET_TTS_URL': (config.POCKET_TTS_URL, True),
             'VIBEVOICE_TTS_URL': (config.VIBEVOICE_TTS_URL, True),
+            'QWEN_TTS_URL': (config.QWEN_TTS_URL, True),
             'VIBEVOICE_MODEL': (config.VIBEVOICE_MODEL, True),
             'VIBEVOICE_INFERENCE_STEPS': (config.VIBEVOICE_INFERENCE_STEPS, False),
             'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
@@ -290,6 +284,8 @@ def save_config():
             'AUDIO_DUCK_RELEASE_MS': (config.AUDIO_DUCK_RELEASE_MS, False),
             'AUDIO_DUCK_DELAY_S': (config.AUDIO_DUCK_DELAY_S, False),
             'AUDIO_DUCK_HOLD_S': (config.AUDIO_DUCK_HOLD_S, False),
+            'AVATAR_TALK_START_DELAY_S': (config.AVATAR_TALK_START_DELAY_S, False),
+            'AVATAR_TALK_STOP_DELAY_S': (config.AVATAR_TALK_STOP_DELAY_S, False),
             'STT_WHISPER_MODEL': (config.STT_WHISPER_MODEL, True),
             'STT_VAD_AGGRESSIVENESS': (config.STT_VAD_AGGRESSIVENESS, False),
             'STT_SILENCE_THRESHOLD_S': (config.STT_SILENCE_THRESHOLD_S, False),
@@ -331,6 +327,10 @@ def save_config():
             'VISION_IMAGE_SOURCE': (config.VISION_IMAGE_SOURCE, True),
             'VISION_CAMERA_INDEX': (config.VISION_CAMERA_INDEX, False),
             'VISION_NDI_SOURCE_NAME': (config.VISION_NDI_SOURCE_NAME, True),
+            'GAME_AGENT_ENABLED': (config.GAME_AGENT_ENABLED, False),
+            'GAME_AGENT_INTERVAL_S': (config.GAME_AGENT_INTERVAL_S, False),
+            'GAME_AGENT_MOVE_ADDRESS': (config.GAME_AGENT_MOVE_ADDRESS, True),
+            'GAME_AGENT_TURN_ADDRESS': (config.GAME_AGENT_TURN_ADDRESS, True),
             'SSN_SESSION_ID': (config.SSN_SESSION_ID, True),
             'OLLAMA_MODEL': (config.OLLAMA_MODEL, True),
         }
@@ -352,6 +352,19 @@ def save_config():
             content = prompt_pattern.sub(lambda m: f'SYSTEM_PROMPT = {prompt_literal}', content)
         else:
             content += f'\nSYSTEM_PROMPT = {prompt_literal}\n'
+
+        # Persist GAME_AGENT_SYSTEM_PROMPT (multiline, handled separately).
+        # Match both parenthesized and plain (single-line) definitions, up to the
+        # closing paren or end-of-line, so a rewrite never leaves an orphan.
+        game_prompt_literal = repr(config.GAME_AGENT_SYSTEM_PROMPT)
+        game_prompt_pattern = re.compile(
+            r'^GAME_AGENT_SYSTEM_PROMPT\s*=\s*(?:\([^\n]*\n(?:.*\n)*?\)|.*?)(?=\n#|\n[A-Z_]+|\Z)',
+            re.MULTILINE
+        )
+        if game_prompt_pattern.search(content):
+            content = game_prompt_pattern.sub(lambda m: f'GAME_AGENT_SYSTEM_PROMPT = {game_prompt_literal}', content)
+        else:
+            content += f'\nGAME_AGENT_SYSTEM_PROMPT = {game_prompt_literal}\n'
 
         # Persist OSC_ACTIONS (a list of dicts, handled separately)
         import pprint
@@ -876,6 +889,7 @@ async def handle_incoming_message(data: dict):
         # Update the avatar's current pose so talking doesn't reset it to idle
         global current_pose
         current_pose = value
+        _persist_pose()
         await cognee.remember(speaker, message)
         # Let the LLM come up with a natural in-character comment
         response = await llm.chat(
@@ -1121,6 +1135,7 @@ async def api_status():
             'tts_url': config.TTS_URL,
             'pocket_tts_url': config.POCKET_TTS_URL,
             'vibevoice_tts_url': config.VIBEVOICE_TTS_URL,
+            'qwen_tts_url': config.QWEN_TTS_URL,
             'vibevoice_model': config.VIBEVOICE_MODEL,
             'vibevoice_inference_steps': config.VIBEVOICE_INFERENCE_STEPS,
             'diffusion_steps': config.TTS_DIFFUSION_STEPS,
@@ -1164,7 +1179,14 @@ async def api_status():
                 'ip': config.LIVELINK_IP,
                 'port': config.LIVELINK_PORT
             },
-            'watcher_audio_path': config.TTS_OUTPUT_PATH
+            'watcher_audio_path': config.TTS_OUTPUT_PATH,
+            'avatar': {
+                'talk_animation': config.AVATAR_TALK_ANIMATION,
+                'talk_osc_address': config.AVATAR_TALK_OSC_ADDRESS,
+                'talk_stop_animation': config.AVATAR_TALK_STOP_ANIMATION,
+                'talk_start_delay_s': config.AVATAR_TALK_START_DELAY_S,
+                'talk_stop_delay_s': config.AVATAR_TALK_STOP_DELAY_S,
+            }
         },
         'opencode': {
             'enabled': config.OPENCODE_ENABLED,
@@ -1180,6 +1202,13 @@ async def api_status():
             'image_source': config.VISION_IMAGE_SOURCE,
             'camera_index': config.VISION_CAMERA_INDEX,
             'ndi_source_name': config.VISION_NDI_SOURCE_NAME
+        },
+        'game_agent': {
+            'enabled': config.GAME_AGENT_ENABLED,
+            'interval_s': config.GAME_AGENT_INTERVAL_S,
+            'move_address': config.GAME_AGENT_MOVE_ADDRESS,
+            'turn_address': config.GAME_AGENT_TURN_ADDRESS,
+            'system_prompt': config.GAME_AGENT_SYSTEM_PROMPT
         }
     })
 
@@ -1307,6 +1336,10 @@ async def api_update_settings():
         config.VIBEVOICE_TTS_URL = data['vibevoice_tts_url']
         if config.TTS_ENGINE == "vibevoice":
             tts.tts_url = data['vibevoice_tts_url']
+    if 'qwen_tts_url' in data:
+        config.QWEN_TTS_URL = data['qwen_tts_url']
+        if config.TTS_ENGINE == "qwen":
+            tts.tts_url = data['qwen_tts_url']
     if 'vibevoice_model' in data:
         config.VIBEVOICE_MODEL = data['vibevoice_model']
     if 'vibevoice_inference_steps' in data:
@@ -1407,6 +1440,10 @@ async def api_update_settings():
         config.LIVELINK_IP = data['livelink_ip']
     if 'livelink_port' in data:
         config.LIVELINK_PORT = data['livelink_port']
+    if 'avatar_talk_start_delay_s' in data:
+        config.AVATAR_TALK_START_DELAY_S = data['avatar_talk_start_delay_s']
+    if 'avatar_talk_stop_delay_s' in data:
+        config.AVATAR_TALK_STOP_DELAY_S = data['avatar_talk_stop_delay_s']
     if 'opencode_enabled' in data:
         config.OPENCODE_ENABLED = data['opencode_enabled']
     if 'opencode_api_url' in data:
@@ -1431,6 +1468,16 @@ async def api_update_settings():
         config.VISION_CAMERA_INDEX = data['vision_camera_index']
     if 'vision_ndi_source_name' in data:
         config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
+    if 'game_agent_enabled' in data:
+        config.GAME_AGENT_ENABLED = data['game_agent_enabled']
+    if 'game_agent_interval_s' in data:
+        config.GAME_AGENT_INTERVAL_S = data['game_agent_interval_s']
+    if 'game_agent_move_address' in data:
+        config.GAME_AGENT_MOVE_ADDRESS = data['game_agent_move_address']
+    if 'game_agent_turn_address' in data:
+        config.GAME_AGENT_TURN_ADDRESS = data['game_agent_turn_address']
+    if 'game_agent_system_prompt' in data:
+        config.GAME_AGENT_SYSTEM_PROMPT = data['game_agent_system_prompt']
     if 'background_volume' in data:
         config.BACKGROUND_VOLUME = data['background_volume']
         music.background_volume = data['background_volume']
@@ -1598,6 +1645,7 @@ def apply_action_tag(action: str) -> bool:
     # If it's the base pose, just update state (no OSC needed)
     if action_lower in (config.AVATAR_BASE_POSE, 'idle', 'sitting', 'stand', 'standing'):
         current_pose = action_lower
+        _persist_pose()
         print(f"[AVATAR] Pose set to: {current_pose}")
         return True
 
@@ -1606,12 +1654,36 @@ def apply_action_tag(action: str) -> bool:
         if osc_action.get('value', '').lower() == action_lower:
             send_osc_message(osc_action.get('address', config.OSC_ADDRESS), osc_action.get('value', ''))
             current_pose = action_lower
+            _persist_pose()
             print(f"[AVATAR] Action '{action_lower}' sent via OSC, pose updated.")
             return True
 
     # No match — leave pose unchanged
     print(f"[AVATAR] Unrecognized action '{action}', ignoring.")
     return False
+
+
+def _persist_pose():
+    """Write the current avatar pose to a file so the separate watcher process
+    can restore it after speaking (e.g. keep dancing instead of going idle).
+    Writes locally AND to the network share (so the watcher on the other
+    computer can read it)."""
+    global current_pose
+    path = os.path.join(os.path.dirname(__file__), "current_pose.txt")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(current_pose)
+    except Exception as e:
+        print(f"Failed to persist pose: {e}")
+
+    # Also write to the network share so the watcher on the other computer sees it
+    try:
+        copy_to = getattr(config, 'TTS_COPY_TO', '')
+        if copy_to:
+            import shutil
+            shutil.copy2(path, os.path.join(copy_to, "current_pose.txt"))
+    except Exception as e:
+        print(f"Failed to copy pose to network share: {e}")
 
 
 @app.route('/api/recall', methods=['POST'])
@@ -1627,12 +1699,12 @@ async def api_recall():
 
 @app.route('/api/tts', methods=['POST'])
 async def api_tts():
-    """Test TTS from GUI"""
+    """Test TTS from GUI (full pipeline, including talk animation + ducking)"""
     data = await request.get_json()
     text = data.get('text', '')
-    
-    success = await tts.speak(text)
-    return jsonify({'status': 'ok' if success else 'error'})
+
+    await send_response(text)
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/api/music/songs', methods=['GET'])

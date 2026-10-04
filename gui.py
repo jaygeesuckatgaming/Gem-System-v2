@@ -62,6 +62,7 @@ class ControlPanel(ctk.CTk):
         self.idle_tab = self.tabview.add("Idle Actions")
         self.laya_tab = self.tabview.add("Laya")
         self.stt_tab = self.tabview.add("STT")
+        self.game_tab = self.tabview.add("Game Agent")
         
         self.build_status_tab()
         self.build_llm_tab()
@@ -78,6 +79,7 @@ class ControlPanel(ctk.CTk):
         self.build_idle_tab()
         self.build_laya_tab()
         self.build_stt_tab()
+        self.build_game_tab()
         
         # Auto-start the MCP server so the panel can populate settings
         self.start_mcp_server()
@@ -374,6 +376,9 @@ class ControlPanel(ctk.CTk):
         vibevoice_radio = ctk.CTkRadioButton(engine_frame, text="VibeVoice", variable=self.tts_engine_var, value="vibevoice", command=self.on_engine_change)
         vibevoice_radio.pack(side="left", padx=10, pady=10)
         
+        qwen_radio = ctk.CTkRadioButton(engine_frame, text="Qwen3-TTS", variable=self.tts_engine_var, value="qwen", command=self.on_engine_change)
+        qwen_radio.pack(side="left", padx=10, pady=10)
+        
         # Start server buttons
         start_frame = ctk.CTkFrame(scroll)
         start_frame.pack(fill="x", padx=20, pady=5)
@@ -383,6 +388,8 @@ class ControlPanel(ctk.CTk):
         start_pocket_btn.pack(side="left", padx=10, pady=10)
         start_vibevoice_btn = ctk.CTkButton(start_frame, text="Start VibeVoice", command=self.start_vibevoice)
         start_vibevoice_btn.pack(side="left", padx=10, pady=10)
+        start_qwen_btn = ctk.CTkButton(start_frame, text="Start Qwen3-TTS", command=self.start_qwen)
+        start_qwen_btn.pack(side="left", padx=10, pady=10)
         
         # Enable toggle
         self.tts_enabled_var = ctk.BooleanVar(value=False)
@@ -419,6 +426,13 @@ class ControlPanel(ctk.CTk):
 
         self.vibevoice_tts_url_entry = ctk.CTkEntry(scroll)
         self.vibevoice_tts_url_entry.pack(fill="x", padx=20, pady=10)
+
+        # Qwen3-TTS URL
+        qwen_url_label = ctk.CTkLabel(scroll, text="Qwen3-TTS URL:", font=ctk.CTkFont(size=14))
+        qwen_url_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        self.qwen_tts_url_entry = ctk.CTkEntry(scroll)
+        self.qwen_tts_url_entry.pack(fill="x", padx=20, pady=10)
         
         # Pocket TTS device selection
         pocket_device_label = ctk.CTkLabel(scroll, text="Pocket TTS Device:", font=ctk.CTkFont(size=14))
@@ -1563,7 +1577,30 @@ class ControlPanel(ctk.CTk):
         
         save_osc_btn = ctk.CTkButton(osc_config_frame, text="Save OSC", width=80, command=self.save_osc_settings)
         save_osc_btn.pack(side="left", padx=10, pady=10)
-        
+
+        # --- Talking Animation Delay Controls ---
+        talk_delay_section = ctk.CTkLabel(scroll_frame, text="Talking Animation Delays", font=ctk.CTkFont(size=16, weight="bold"))
+        talk_delay_section.pack(anchor="w", pady=(15, 5))
+
+        # Start delay
+        start_delay_label = ctk.CTkLabel(scroll_frame, text="Start Delay (seconds):", font=ctk.CTkFont(size=13))
+        start_delay_label.pack(anchor="w", pady=(5, 0))
+        self.talk_start_delay_slider = ctk.CTkSlider(scroll_frame, from_=0.0, to=10.0, number_of_steps=100, command=self.update_talk_start_delay_label)
+        self.talk_start_delay_slider.pack(fill="x", pady=(0, 5))
+        self.talk_start_delay_value = ctk.CTkLabel(scroll_frame, text="0.0 s", font=ctk.CTkFont(size=12))
+        self.talk_start_delay_value.pack(anchor="e")
+
+        # Stop delay
+        stop_delay_label = ctk.CTkLabel(scroll_frame, text="Stop Delay (seconds):", font=ctk.CTkFont(size=13))
+        stop_delay_label.pack(anchor="w", pady=(10, 0))
+        self.talk_stop_delay_slider = ctk.CTkSlider(scroll_frame, from_=0.0, to=10.0, number_of_steps=100, command=self.update_talk_stop_delay_label)
+        self.talk_stop_delay_slider.pack(fill="x", pady=(0, 5))
+        self.talk_stop_delay_value = ctk.CTkLabel(scroll_frame, text="0.0 s", font=ctk.CTkFont(size=12))
+        self.talk_stop_delay_value.pack(anchor="e")
+
+        save_talk_delay_btn = ctk.CTkButton(scroll_frame, text="Save Talk Delays", width=140, command=self.save_talk_delays)
+        save_talk_delay_btn.pack(anchor="w", pady=(5, 10))
+
         # --- LiveLink Settings ---
         livelink_section = ctk.CTkLabel(scroll_frame, text="LiveLink (Unreal Engine)", font=ctk.CTkFont(size=16, weight="bold"))
         livelink_section.pack(anchor="w", pady=(15, 5))
@@ -1670,6 +1707,12 @@ class ControlPanel(ctk.CTk):
 
                 self.watcher_audio_entry.delete(0, "end")
                 self.watcher_audio_entry.insert(0, neuro.get('watcher_audio_path', 'tts_output/server_output.wav'))
+
+                avatar = neuro.get('avatar', {})
+                self.talk_start_delay_slider.set(avatar.get('talk_start_delay_s', 0.0))
+                self.talk_start_delay_value.configure(text=f"{avatar.get('talk_start_delay_s', 0.0):.1f} s")
+                self.talk_stop_delay_slider.set(avatar.get('talk_stop_delay_s', 0.0))
+                self.talk_stop_delay_value.configure(text=f"{avatar.get('talk_stop_delay_s', 0.0):.1f} s")
         except Exception as e:
             print(f"Failed to load Neurosync settings: {e}")
     
@@ -1731,6 +1774,25 @@ class ControlPanel(ctk.CTk):
                 print("✓ Watcher audio path saved")
         except Exception as e:
             print(f"Failed to save watcher audio path: {e}")
+
+    def update_talk_start_delay_label(self, value):
+        self.talk_start_delay_value.configure(text=f"{float(value):.1f} s")
+
+    def update_talk_stop_delay_label(self, value):
+        self.talk_stop_delay_value.configure(text=f"{float(value):.1f} s")
+
+    def save_talk_delays(self):
+        """Save the talking animation start/stop delays to the server."""
+        try:
+            payload = {
+                'avatar_talk_start_delay_s': round(self.talk_start_delay_slider.get(), 1),
+                'avatar_talk_stop_delay_s': round(self.talk_stop_delay_slider.get(), 1),
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Talking animation delays saved")
+        except Exception as e:
+            print(f"Failed to save talking animation delays: {e}")
     
     def send_test_emote(self, emote_name):
         """Send a test emote via OSC"""
@@ -2553,6 +2615,12 @@ class ControlPanel(ctk.CTk):
         bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_vibevoice.bat")
         if self._launch_detached(bat_path):
             print("✓ Started VibeVoice Server")
+
+    def start_qwen(self):
+        """Launch the Qwen3-TTS server"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_qwen_tts.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started Qwen3-TTS Server")
     
     def save_pocket_device(self):
         """Save Pocket TTS device selection to settings.ini"""
@@ -2592,6 +2660,9 @@ class ControlPanel(ctk.CTk):
 
                 self.vibevoice_tts_url_entry.delete(0, "end")
                 self.vibevoice_tts_url_entry.insert(0, tts.get('vibevoice_tts_url', 'http://127.0.0.1:13000/tts'))
+
+                self.qwen_tts_url_entry.delete(0, "end")
+                self.qwen_tts_url_entry.insert(0, tts.get('qwen_tts_url', 'http://127.0.0.1:13302/tts'))
 
                 self.vibevoice_model_entry.delete(0, "end")
                 self.vibevoice_model_entry.insert(0, tts.get('vibevoice_model', 'microsoft/VibeVoice-1.5B'))
@@ -2651,6 +2722,7 @@ class ControlPanel(ctk.CTk):
                 'tts_url': self.tts_url_entry.get().strip(),
                 'pocket_tts_url': self.pocket_tts_url_entry.get().strip(),
                 'vibevoice_tts_url': self.vibevoice_tts_url_entry.get().strip(),
+                'qwen_tts_url': self.qwen_tts_url_entry.get().strip(),
                 'vibevoice_model': self.vibevoice_model_entry.get().strip(),
                 'vibevoice_inference_steps': int(self.vibevoice_steps_slider.get()),
                 'tts_diffusion_steps': int(self.diffusion_steps_slider.get()),
@@ -3246,6 +3318,102 @@ class ControlPanel(ctk.CTk):
                 print("STT settings saved")
         except Exception as e:
             print(f"Failed to save STT settings: {e}")
+
+    # ==================== GAME AGENT TAB ====================
+    def build_game_tab(self):
+        """Build the Game Agent tab (autonomous gameplay)"""
+        title = ctk.CTkLabel(self.game_tab, text="Game Agent", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=10)
+
+        info = ctk.CTkLabel(
+            self.game_tab,
+            text="Autonomous gameplay: captures a frame, asks the vision LLM what to do, "
+                 "and sends movement commands to Unreal via OSC.",
+            font=ctk.CTkFont(size=12)
+        )
+        info.pack(anchor="w", padx=20, pady=(0, 10))
+
+        scroll = ctk.CTkScrollableFrame(self.game_tab)
+        scroll.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Enable toggle
+        self.game_agent_enabled_var = ctk.BooleanVar(value=False)
+        enable_check = ctk.CTkCheckBox(scroll, text="Enable Game Agent", variable=self.game_agent_enabled_var)
+        enable_check.pack(anchor="w", padx=10, pady=10)
+
+        # Start button
+        start_btn = ctk.CTkButton(scroll, text="Start Game Agent", command=self.start_game_agent)
+        start_btn.pack(anchor="w", padx=10, pady=10)
+
+        # Interval
+        interval_label = ctk.CTkLabel(scroll, text="Decision Interval (seconds):", font=ctk.CTkFont(size=14))
+        interval_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.game_interval_entry = ctk.CTkEntry(scroll)
+        self.game_interval_entry.pack(fill="x", padx=10, pady=5)
+
+        # Move OSC address
+        move_label = ctk.CTkLabel(scroll, text="Move OSC Address:", font=ctk.CTkFont(size=14))
+        move_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.game_move_entry = ctk.CTkEntry(scroll)
+        self.game_move_entry.pack(fill="x", padx=10, pady=5)
+
+        # Turn OSC address
+        turn_label = ctk.CTkLabel(scroll, text="Turn OSC Address:", font=ctk.CTkFont(size=14))
+        turn_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.game_turn_entry = ctk.CTkEntry(scroll)
+        self.game_turn_entry.pack(fill="x", padx=10, pady=5)
+
+        # System prompt
+        prompt_label = ctk.CTkLabel(scroll, text="Agent System Prompt:", font=ctk.CTkFont(size=14))
+        prompt_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.game_prompt_text = ctk.CTkTextbox(scroll, height=140)
+        self.game_prompt_text.pack(fill="x", padx=10, pady=5)
+
+        # Save button
+        save_btn = ctk.CTkButton(scroll, text="Save Game Agent Settings", command=self.save_game_settings)
+        save_btn.pack(pady=15)
+
+        self.load_game_settings()
+
+    def start_game_agent(self):
+        """Launch the game agent (start_scripts/start_game_agent.bat)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_game_agent.bat")
+        if self._launch_detached(bat_path):
+            print("✓ Started Game Agent")
+
+    def load_game_settings(self):
+        """Load game agent settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json().get('game_agent', {})
+                self.game_agent_enabled_var.set(data.get('enabled', False))
+                self.game_interval_entry.delete(0, "end")
+                self.game_interval_entry.insert(0, str(data.get('interval_s', 1.0)))
+                self.game_move_entry.delete(0, "end")
+                self.game_move_entry.insert(0, data.get('move_address', '/agent/move'))
+                self.game_turn_entry.delete(0, "end")
+                self.game_turn_entry.insert(0, data.get('turn_address', '/agent/turn'))
+                self.game_prompt_text.delete("1.0", "end")
+                self.game_prompt_text.insert("1.0", data.get('system_prompt', ''))
+        except Exception as e:
+            print(f"Failed to load game agent settings: {e}")
+
+    def save_game_settings(self):
+        """Save game agent settings to server"""
+        try:
+            payload = {
+                'game_agent_enabled': self.game_agent_enabled_var.get(),
+                'game_agent_interval_s': float(self.game_interval_entry.get().strip() or 1.0),
+                'game_agent_move_address': self.game_move_entry.get().strip(),
+                'game_agent_turn_address': self.game_turn_entry.get().strip(),
+                'game_agent_system_prompt': self.game_prompt_text.get("1.0", "end").strip(),
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Game agent settings saved")
+        except Exception as e:
+            print(f"Failed to save game agent settings: {e}")
 
     def on_close(self):
         """Clean up on window close"""

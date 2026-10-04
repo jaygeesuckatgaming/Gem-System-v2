@@ -39,6 +39,9 @@ VIBEVOICE_INFERENCE_STEPS = 5
 VIBEVOICE_NUM_SPEAKERS = 1
 VIBEVOICE_CFG_SCALE = 1.3
 
+# Qwen3-TTS
+QWEN_TTS_URL = "http://127.0.0.1:13302/tts"
+
 # Audio Player (plays TTS output when not using Neurosync)
 AUDIO_PLAYER_ENABLED = True
 TTS_OUTPUT_PATH = "tts_output/server_output.wav"
@@ -97,6 +100,8 @@ AVATAR_ACTION_TAG_ENABLED = True   # Parse [ACTION: x] tags from LLM responses
 AVATAR_TALK_ANIMATION = "play_talking_animation"
 AVATAR_TALK_OSC_ADDRESS = "/chat/message"
 AVATAR_TALK_STOP_ANIMATION = "idle"   # OSC value sent when the avatar finishes speaking
+AVATAR_TALK_START_DELAY_S = 0.0       # Delay (s) before sending the "start talking" animation
+AVATAR_TALK_STOP_DELAY_S = 0.0        # Extra delay (s) before sending the "stop talking" animation
 
 # Idle Actions (autonomous behavior when chat goes quiet)
 IDLE_ACTIONS_ENABLED = True
@@ -157,6 +162,19 @@ VISION_TRIGGER_WORDS = ["see", "describe", "analyze", "scan", "what is in", "wha
 VISION_IMAGE_SOURCE = "cam"
 VISION_CAMERA_INDEX = 0
 VISION_NDI_SOURCE_NAME = ""
+
+# Game Agent (autonomous gameplay via vision + LLM + OSC)
+GAME_AGENT_ENABLED = False
+GAME_AGENT_INTERVAL_S = 1.0
+GAME_AGENT_MOVE_ADDRESS = "/agent/move"
+GAME_AGENT_TURN_ADDRESS = "/agent/turn"
+GAME_AGENT_SYSTEM_PROMPT = (
+    "You are an AI agent controlling a character in a simple game. You see a "
+    "screenshot of the game. Decide how to move and reply with EXACTLY one line "
+    "in this format, no extra text:\n"
+    "MOVE: <forward|back|stop>  TURN: <left|right|stop>\n"
+    "Choose based on what would let the character walk around and avoid obstacles."
+)
 
 # Server
 SERVER_HOST = "127.0.0.1"

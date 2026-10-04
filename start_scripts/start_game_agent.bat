@@ -1,0 +1,8 @@
+@echo off
+TITLE Game Agent
+set PYTHONUTF8=1
+cd C:\Users\jayge\Documents\AI\Gem-System-v2
+call C:\Users\jayge\miniconda3\Scripts\activate.bat
+call conda activate mcp_env_2
+call python game_agent.py
+cmd /k
