@@ -290,6 +290,7 @@ def save_config():
             'STT_VAD_AGGRESSIVENESS': (config.STT_VAD_AGGRESSIVENESS, False),
             'STT_SILENCE_THRESHOLD_S': (config.STT_SILENCE_THRESHOLD_S, False),
             'STT_PRE_BUFFER_S': (config.STT_PRE_BUFFER_S, False),
+            'STT_MIN_DB': (config.STT_MIN_DB, False),
             'BACKGROUND_VOLUME': (config.BACKGROUND_VOLUME, False),
             'BLENDSHAPE_MOUTH_SCALE': (config.BLENDSHAPE_MOUTH_SCALE, False),
             'BLENDSHAPE_EYE_SCALE': (config.BLENDSHAPE_EYE_SCALE, False),
@@ -734,7 +735,11 @@ async def handle_incoming_message(data: dict):
     # Extract message data
     message = data.get('chatmessage', '')
     speaker = data.get('chatname', 'Unknown')
-    
+
+    # Replace alternate wake names (e.g. "jim") with "Gem" early, so the LLM
+    # never sees the wrong name (not in chat history, not in the prompt).
+    message = re.sub(r'\bjim\b', 'Gem', message, flags=re.IGNORECASE)
+
     print(f"\n[CHAT] {speaker}: {message}")
     
     # Track known speakers (for nickname resolution)
@@ -1161,7 +1166,8 @@ async def api_status():
             'whisper_model': config.STT_WHISPER_MODEL,
             'vad_aggressiveness': config.STT_VAD_AGGRESSIVENESS,
             'silence_threshold_s': config.STT_SILENCE_THRESHOLD_S,
-            'pre_buffer_s': config.STT_PRE_BUFFER_S
+            'pre_buffer_s': config.STT_PRE_BUFFER_S,
+            'min_db': config.STT_MIN_DB
         },
         'neurosync': {
             'mouth_scale': config.BLENDSHAPE_MOUTH_SCALE,
@@ -1386,6 +1392,8 @@ async def api_update_settings():
         config.STT_SILENCE_THRESHOLD_S = data['stt_silence_threshold_s']
     if 'stt_pre_buffer_s' in data:
         config.STT_PRE_BUFFER_S = data['stt_pre_buffer_s']
+    if 'stt_min_db' in data:
+        config.STT_MIN_DB = data['stt_min_db']
     if 'blendshape_mouth_scale' in data:
         config.BLENDSHAPE_MOUTH_SCALE = data['blendshape_mouth_scale']
     if 'blendshape_eye_scale' in data:

@@ -1078,6 +1078,8 @@ class ControlPanel(ctk.CTk):
         self._input_peak_db = MIN_DB
         self._input_peak_hold_time = time.time()
         self.monitor_input_btn.configure(text="Stop")
+        if hasattr(self, 'stt_monitor_input_btn'):
+            self.stt_monitor_input_btn.configure(text="Stop")
         
         try:
             samplerate = sd.query_devices(device_id, 'input')['default_samplerate']
@@ -1101,6 +1103,8 @@ class ControlPanel(ctk.CTk):
         self._input_stream = None
         self._is_monitoring_input = False
         self.monitor_input_btn.configure(text="Monitor")
+        if hasattr(self, 'stt_monitor_input_btn'):
+            self.stt_monitor_input_btn.configure(text="Monitor Input")
         self._input_smoothed_db = MIN_DB
         self._input_peak_db = MIN_DB
     
@@ -1114,11 +1118,29 @@ class ControlPanel(ctk.CTk):
             self._input_peak_db = self._input_smoothed_db
             self._input_peak_hold_time = time.time()
     
-    def _update_input_vu_meter(self):
-        """Update the input VU meter canvas"""
-        if not hasattr(self, 'input_vu_canvas'):
+    def _draw_vu_meter(self, canvas, smoothed_db, peak_db):
+        """Draw a VU meter bar onto the given canvas."""
+        width = canvas.winfo_width()
+        height = canvas.winfo_height()
+        if width <= 1:
             return
-        
+        canvas.delete("all")
+        bar_len = int(((max(MIN_DB, min(smoothed_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        green_w = int(width * 0.7)
+        yellow_w = int(width * 0.9)
+        if bar_len > 0:
+            canvas.create_rectangle(0, 0, min(bar_len, green_w), height, fill="#4CAF50", width=0)
+        if bar_len > green_w:
+            canvas.create_rectangle(green_w, 0, min(bar_len, yellow_w), height, fill="#FFC107", width=0)
+        if bar_len > yellow_w:
+            canvas.create_rectangle(yellow_w, 0, bar_len, height, fill="#F44336", width=0)
+        peak_pos = int(((max(MIN_DB, min(peak_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
+        if peak_pos > 1:
+            canvas.create_line(peak_pos, 0, peak_pos, height, fill="white", width=2)
+        canvas.create_text(width - 10, height / 2, text=f"{smoothed_db:.1f} dB", anchor="e", fill="white")
+
+    def _update_input_vu_meter(self):
+        """Update the input VU meter canvases (Audio tab + STT tab)"""
         # Decay peak hold
         if getattr(self, '_is_monitoring_input', False):
             if time.time() - getattr(self, '_input_peak_hold_time', time.time()) > PEAK_HOLD_DURATION:
@@ -1126,34 +1148,14 @@ class ControlPanel(ctk.CTk):
         else:
             self._input_smoothed_db = max(MIN_DB, self._input_smoothed_db - 3)
             self._input_peak_db = max(self._input_smoothed_db, self._input_peak_db - 3)
-        
-        canvas = self.input_vu_canvas
-        width = canvas.winfo_width()
-        height = canvas.winfo_height()
-        if width <= 1:
-            return
-        
-        canvas.delete("all")
-        
+
         smoothed_db = getattr(self, '_input_smoothed_db', MIN_DB)
         peak_db = getattr(self, '_input_peak_db', MIN_DB)
-        
-        bar_len = int(((max(MIN_DB, min(smoothed_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
-        green_w = int(width * 0.7)
-        yellow_w = int(width * 0.9)
-        
-        if bar_len > 0:
-            canvas.create_rectangle(0, 0, min(bar_len, green_w), height, fill="#4CAF50", width=0)
-        if bar_len > green_w:
-            canvas.create_rectangle(green_w, 0, min(bar_len, yellow_w), height, fill="#FFC107", width=0)
-        if bar_len > yellow_w:
-            canvas.create_rectangle(yellow_w, 0, bar_len, height, fill="#F44336", width=0)
-        
-        peak_pos = int(((max(MIN_DB, min(peak_db, MAX_DB)) - MIN_DB) / (MAX_DB - MIN_DB)) * width)
-        if peak_pos > 1:
-            canvas.create_line(peak_pos, 0, peak_pos, height, fill="white", width=2)
-        
-        canvas.create_text(width - 10, height / 2, text=f"{smoothed_db:.1f} dB", anchor="e", fill="white")
+
+        if hasattr(self, 'input_vu_canvas'):
+            self._draw_vu_meter(self.input_vu_canvas, smoothed_db, peak_db)
+        if hasattr(self, 'stt_input_vu_canvas'):
+            self._draw_vu_meter(self.stt_input_vu_canvas, smoothed_db, peak_db)
     
     # ==================== MUSIC TAB ====================
     def build_music_tab(self):
@@ -3260,6 +3262,24 @@ class ControlPanel(ctk.CTk):
         self.stt_model_entry = ctk.CTkEntry(scroll)
         self.stt_model_entry.pack(fill="x", padx=10, pady=5)
 
+        # Input VU meter (mirrors the Audio tab input device)
+        stt_input_vu_label = ctk.CTkLabel(scroll, text="Input Level (VU):", font=ctk.CTkFont(size=14))
+        stt_input_vu_label.pack(anchor="w", padx=10, pady=(10, 0))
+
+        self.stt_input_vu_canvas = ctk.CTkCanvas(scroll, height=30, bg="#1a1a1a", highlightthickness=0)
+        self.stt_input_vu_canvas.pack(fill="x", padx=10, pady=(0, 5))
+
+        self.stt_monitor_input_btn = ctk.CTkButton(scroll, text="Monitor Input", width=140, command=self.toggle_input_monitor)
+        self.stt_monitor_input_btn.pack(anchor="w", padx=10, pady=(0, 10))
+
+        # Min dB energy gate (audio below this level is ignored)
+        min_db_label = ctk.CTkLabel(scroll, text="Min Input Level (dB gate):", font=ctk.CTkFont(size=14))
+        min_db_label.pack(anchor="w", padx=10, pady=(10, 0))
+        self.stt_min_db_slider = ctk.CTkSlider(scroll, from_=-70.0, to=-20.0, number_of_steps=50, command=self.update_stt_min_db_label)
+        self.stt_min_db_slider.pack(fill="x", padx=10, pady=(0, 5))
+        self.stt_min_db_value = ctk.CTkLabel(scroll, text="-40.0 dB", font=ctk.CTkFont(size=12))
+        self.stt_min_db_value.pack(anchor="e", padx=10)
+
         # VAD aggressiveness
         vad_label = ctk.CTkLabel(scroll, text="VAD Aggressiveness (0-3):", font=ctk.CTkFont(size=14))
         vad_label.pack(anchor="w", padx=10, pady=(10, 0))
@@ -3287,6 +3307,9 @@ class ControlPanel(ctk.CTk):
     def update_stt_vad_label(self, value):
         self.stt_vad_value.configure(text=str(int(value)))
 
+    def update_stt_min_db_label(self, value):
+        self.stt_min_db_value.configure(text=f"{float(value):.1f} dB")
+
     def load_stt_settings(self):
         """Load STT settings from server"""
         try:
@@ -3301,6 +3324,8 @@ class ControlPanel(ctk.CTk):
                 self.stt_silence_entry.insert(0, str(data.get('silence_threshold_s', 2.0)))
                 self.stt_prebuf_entry.delete(0, "end")
                 self.stt_prebuf_entry.insert(0, str(data.get('pre_buffer_s', 0.5)))
+                self.stt_min_db_slider.set(data.get('min_db', -40.0))
+                self.stt_min_db_value.configure(text=f"{data.get('min_db', -40.0):.1f} dB")
         except Exception as e:
             print(f"Failed to load STT settings: {e}")
 
@@ -3312,6 +3337,7 @@ class ControlPanel(ctk.CTk):
                 'stt_vad_aggressiveness': int(self.stt_vad_slider.get()),
                 'stt_silence_threshold_s': float(self.stt_silence_entry.get().strip() or 2.0),
                 'stt_pre_buffer_s': float(self.stt_prebuf_entry.get().strip() or 0.5),
+                'stt_min_db': float(self.stt_min_db_slider.get()),
             }
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
             if response.status_code == 200:

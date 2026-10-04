@@ -62,6 +62,7 @@ STT_WHISPER_MODEL = "base.en"
 STT_VAD_AGGRESSIVENESS = 1
 STT_SILENCE_THRESHOLD_S = 2.0
 STT_PRE_BUFFER_S = 0.5
+STT_MIN_DB = -40.0   # Energy gate: audio below this dB level is ignored (matches the VU meter)
 
 # Background music / playlist volume (0.0 - 1.0)
 BACKGROUND_VOLUME = 0.5

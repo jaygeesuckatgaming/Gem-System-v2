@@ -30,6 +30,7 @@ FRAME_DURATION_MS = 20
 FRAMES_PER_BUFFER = int(SAMPLE_RATE * FRAME_DURATION_MS / 1000)
 SILENCE_THRESHOLD_S = 2.0
 PRE_BUFFER_S = 0.5
+MIN_DB = -40.0   # Energy gate threshold (dB); audio below this is treated as silence
 WAV_FILE_NAME = "temp_audio_chunk.wav"
 
 # --- Global State ---
@@ -50,7 +51,7 @@ def load_settings_from_ini():
     sys.path.insert(0, project_root)
     import config as cfg
 
-    global VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_S, PRE_BUFFER_S
+    global VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_S, PRE_BUFFER_S, MIN_DB
 
     settings = {}
     
@@ -66,6 +67,7 @@ def load_settings_from_ini():
         VAD_AGGRESSIVENESS = int(getattr(cfg, 'STT_VAD_AGGRESSIVENESS', 1))
         SILENCE_THRESHOLD_S = float(getattr(cfg, 'STT_SILENCE_THRESHOLD_S', 2.0))
         PRE_BUFFER_S = float(getattr(cfg, 'STT_PRE_BUFFER_S', 0.5))
+        MIN_DB = float(getattr(cfg, 'STT_MIN_DB', -40.0))
 
         # Get the audio input device string from config.py
         device_string = getattr(cfg, 'AUDIO_INPUT_DEVICE', '')
@@ -133,6 +135,23 @@ def main():
         sys.exit(f"An error occurred during initialization: {e}")
 
     max_silent_frames = int(SILENCE_THRESHOLD_S * SAMPLE_RATE / FRAMES_PER_BUFFER)
+
+    # Smoothing state so the gate matches the VU meter (which uses 0.85 smoothing).
+    _smoothed_db = -100.0
+    SMOOTHING = 0.85
+
+    def frame_is_speech(frame: bytes) -> bool:
+        """A frame counts as speech if it passes BOTH the energy gate (MIN_DB)
+        and the WebRTC VAD classifier. Uses the same smoothing as the VU meter
+        so the threshold visually matches what you see."""
+        nonlocal _smoothed_db
+        arr = np.frombuffer(frame, dtype=np.int16).astype(np.float32) / 32768.0
+        rms = np.sqrt(np.mean(arr ** 2))
+        db = 20 * np.log10(rms) if rms > 0 else -100.0
+        _smoothed_db = (SMOOTHING * _smoothed_db) + ((1 - SMOOTHING) * db)
+        if _smoothed_db < MIN_DB:
+            return False
+        return vad.is_speech(frame, SAMPLE_RATE)
     
     # Get the device name for a user-friendly startup message
     device_name = sd.query_devices(selected_device)['name']
@@ -142,7 +161,7 @@ def main():
         with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=FRAMES_PER_BUFFER, device=selected_device, dtype="int16", channels=1, callback=audio_callback):
             while True:
                 frame = audio_queue.get()
-                is_speech = vad.is_speech(frame, SAMPLE_RATE)
+                is_speech = frame_is_speech(frame)
 
                 if is_recording:
                     recorded_frames.append(frame)
