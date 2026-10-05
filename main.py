@@ -928,12 +928,10 @@ async def handle_incoming_message(data: dict):
         print(f"👁️ Vision command detected: '{message}'")
         await cognee.remember(speaker, message)
         
-        # Get scene description from vision service
-        vision_context = await vision.get_scene_description()
-        if vision_context:
-            # Include vision context in the LLM prompt
-            system_prompt = f"{config.SYSTEM_PROMPT}\n\nYou can see the current scene: {vision_context}"
-            response = await llm.chat(message, system_prompt=system_prompt)
+        # Get the actual image and send it to the multimodal LLM (Gemma).
+        image_base64 = await vision.get_image_base64()
+        if image_base64:
+            response = await llm.chat_with_image(message, image_base64, system_prompt=config.SYSTEM_PROMPT)
         else:
             response = await llm.chat(message, system_prompt=config.SYSTEM_PROMPT)
         
@@ -950,9 +948,13 @@ async def handle_incoming_message(data: dict):
         location = extract_time_location(message)
         time_ctx = get_time_for_location(location)
         print(f"🕐 Time context: '{time_ctx}'")
-        # Force the LLM to use the actual time, not make up its own answer
+        # Force the LLM to use the actual time, but answer in-character (nuanced).
         response = await llm.chat(
-            f"{time_ctx} User asks: '{message}'. Give ONLY the actual time shown above, be concise.",
+            f"{time_ctx} User asks: '{message}'. Answer in character as Gem. "
+            f"Use the exact time shown above, but deliver it naturally and with your "
+            f"usual personality - you can add a playful remark, a comment about the "
+            f"time of day, or a casual aside. Keep it to 1-2 sentences and never "
+            f"invent a different time.",
             system_prompt=config.SYSTEM_PROMPT
         )
         print(f"[GEM] {response}")

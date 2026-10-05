@@ -43,6 +43,24 @@ class LLMClient:
         except Exception as e:
             return f"Error: {e}"
 
+    async def chat_with_image(self, message: str, image_base64: str,
+                              system_prompt: Optional[str] = None) -> str:
+        """Send a message with an attached image (base64) to a multimodal model."""
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            messages.append({
+                'role': 'user',
+                'content': message,
+                'images': [image_base64],
+            })
+            response = self.client.chat(model=self.model, messages=messages)
+            self.enabled = True
+            return response['message']['content']
+        except Exception as e:
+            return f"Error: {e}"
+
     def chat_sync(self, message: str, system_prompt: Optional[str] = None) -> str:
         """Synchronous version of chat (for use in non-async contexts)."""
         try:
