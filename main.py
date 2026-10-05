@@ -16,7 +16,7 @@ from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
-from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient
+from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient, WeatherClient
 from clients.audio_player import AudioPlayer
 from clients.opencode_client import format_opencode_response
 from clients.idle_manager import IdleManager
@@ -46,6 +46,7 @@ music.music_device_name = getattr(config, 'MUSIC_OUTPUT_DEVICE', '') or None
 music.twitch_checker.llm_parse_function = llm.chat_sync
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
+weather = WeatherClient(latitude=config.WEATHER_LATITUDE, longitude=config.WEATHER_LONGITUDE)
 
 # Record downloaded songs to memory so Gem remembers them
 def _on_download_complete(query: str):
@@ -100,27 +101,10 @@ def resume_current_pose():
 
 async def send_response(response: str):
     """Send a response to TTS and (optionally) to chat.
-    The talking animation is driven by watcher_to_face (actual playback timing)."""
+    Audio ducking + talking animation are driven by watcher_to_face (the process
+    that actually plays the audio), so this only handles TTS + chat."""
     if config.TTS_ENABLED:
         await tts.speak(response)
-        # Duck AFTER synthesis, so the music stays up during synthesis latency
-        # and only ducks once the voice is actually ready to play.
-        speech_seconds = _get_tts_wav_seconds()
-        if speech_seconds <= 0:
-            speech_seconds = _estimate_speech_seconds(response)
-        if speech_seconds > 0:
-            delay = getattr(config, 'AUDIO_DUCK_DELAY_S', 0.0)
-            if delay > 0:
-                await asyncio.sleep(delay)
-
-            _duck_music()
-            await asyncio.sleep(speech_seconds)
-
-            # Hold the duck a bit longer to account for network/watcher latency
-            hold = getattr(config, 'AUDIO_DUCK_HOLD_S', 0.0)
-            if hold > 0:
-                await asyncio.sleep(hold)
-            _unduck_music()
 
     if config.SEND_RESPONSES_TO_CHAT:
         await ssn.send_message(response, targets=config.SSN_TARGETS)
@@ -726,6 +710,32 @@ def extract_time_location(text: str) -> str:
     return text_lower
 
 
+def is_weather_command(text: str) -> bool:
+    """Check if a message is asking about the weather."""
+    text_lower = text.lower().strip()
+    triggers = [
+        "weather", "temperature", "how hot", "how cold", "is it raining",
+        "is it sunny", "forecast", "humidity", "wind speed",
+    ]
+    return any(t in text_lower for t in triggers)
+
+
+def extract_weather_location(text: str) -> str:
+    """Extract a location from a weather query, defaulting to Pattaya."""
+    text_lower = text.lower()
+    for phrase in ["weather in ", "weather like in ", "temperature in ", "forecast in ",
+                   "weather for ", "weather at ", "weather like at "]:
+        if phrase in text_lower:
+            rest = text_lower.split(phrase, 1)[1].strip(" ?.,!")
+            if rest:
+                return rest
+    # Fallback: if a known city name is present, use it
+    for city in ["pattaya", "bangkok", "phuket", "chiang mai", "london", "new york", "tokyo"]:
+        if city in text_lower:
+            return city
+    return "Pattaya"
+
+
 async def handle_incoming_message(data: dict):
     """Process incoming chat from SSN WebSocket"""
     # If paused, silently ignore all incoming messages
@@ -957,6 +967,34 @@ async def handle_incoming_message(data: dict):
             f"invent a different time.",
             system_prompt=config.SYSTEM_PROMPT
         )
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        await send_response(response)
+        return
+
+    # Check for weather query (intercept before LLM so it uses the real weather)
+    if is_weather_command(message):
+        print(f"🌤️ Weather command detected: '{message}'")
+        await cognee.remember(speaker, message)
+        location = extract_weather_location(message)
+        result = await weather.get_weather_for_location(location)
+        if result:
+            desc = weather.describe_weather(result["weather"])
+            print(f"🌤️ Weather context: {result['location']}: {desc}")
+            response = await llm.chat(
+                f"The current weather in {result['location']} is: {desc}. "
+                f"User asks: '{message}'. Answer in character as Gem, using the real "
+                f"weather data above. Be natural and add a touch of personality. "
+                f"Never invent different weather.",
+                system_prompt=config.SYSTEM_PROMPT
+            )
+        else:
+            response = await llm.chat(
+                f"User asked about the weather: '{message}'. I couldn't fetch live "
+                f"weather data. Answer in character and say I couldn't get the weather.",
+                system_prompt=config.SYSTEM_PROMPT
+            )
         print(f"[GEM] {response}")
         await cognee.remember("Gem", response)
         _last_ai_responses.append(html.unescape(response).strip())
@@ -1953,4 +1991,5 @@ if __name__ == '__main__':
     print(f"Server: http://{config.SERVER_HOST}:{config.SERVER_PORT}")
     print("=" * 60)
     
-    app.run(host=config.SERVER_HOST, port=config.SERVER_PORT)
+    bind_host = getattr(config, 'SERVER_BIND_HOST', config.SERVER_HOST)
+    app.run(host=bind_host, port=config.SERVER_PORT)

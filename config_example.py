@@ -164,6 +164,10 @@ VISION_IMAGE_SOURCE = "cam"
 VISION_CAMERA_INDEX = 0
 VISION_NDI_SOURCE_NAME = ""
 
+# Weather (Open-Meteo, no API key)
+WEATHER_LATITUDE = 12.9276    # Pattaya, Thailand
+WEATHER_LONGITUDE = 100.8826
+
 # Game Agent (autonomous gameplay via vision + LLM + OSC)
 GAME_AGENT_ENABLED = False
 GAME_AGENT_INTERVAL_S = 1.0
@@ -180,6 +184,7 @@ GAME_AGENT_SYSTEM_PROMPT = (
 # Server
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 5000
+SERVER_BIND_HOST = "0.0.0.0"   # Bind address for app.run (0.0.0.0 = accept cross-machine requests)
 
 # System Prompt
 SYSTEM_PROMPT = """You are Gem.
