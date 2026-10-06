@@ -131,10 +131,44 @@ def _get_tts_wav_seconds() -> float:
     return 0.0
 
 
+async def _get_idle_memories() -> str:
+    """Gather recent chat context for the idle monologue.
+    Uses the in-memory chat history (reliable) plus cognee recall (if available)."""
+    parts = []
+
+    # 1. In-memory recent chat history (always available)
+    chat = get_chat_history_context()
+    if chat:
+        parts.append(chat)
+
+    # 2. Cognee memory recall (best-effort, short timeout)
+    try:
+        import asyncio
+        results = await asyncio.wait_for(
+            cognee.recall("memorable moments, jokes, and interesting conversations from chat", top_k=6),
+            timeout=2.0
+        )
+        if results:
+            parts.append("Other things you remember:\n" + "\n".join(f"- {r}" for r in results))
+    except Exception as e:
+        print(f"[IDLE] Memory recall skipped: {e}")
+
+    return "\n\n".join(parts)
+
+
 async def _idle_monologue(topic: str):
     """Generate and speak an idle monologue via the LLM + TTS."""
     monologue_prompt = config.IDLE_MONOLOGUE_PROMPT.format(topic=topic)
+    memory_context = await _get_idle_memories()
+
     system_prompt = f"{config.SYSTEM_PROMPT}\n\n{monologue_prompt}"
+    if memory_context:
+        system_prompt = (
+            f"{system_prompt}\n\n{memory_context}\n"
+            f"Feel free to weave these past chat memories into what you say, "
+            f"referencing people, jokes, or events from earlier conversations."
+        )
+
     response = await llm.chat("", system_prompt=system_prompt)
     print(f"[IDLE MONOLOGUE] {response}")
 
@@ -901,10 +935,16 @@ async def handle_incoming_message(data: dict):
         address = osc_action.get('address', config.OSC_ADDRESS)
         value = osc_action.get('value', '')
         send_osc_message(address, value)
-        # Update the avatar's current pose so talking doesn't reset it to idle
+        # Update the avatar's current pose ONLY for persistent (continuous) actions.
+        # One-shot gestures (wave, give the finger, etc.) revert to the base pose
+        # so the talk animation isn't incorrectly skipped afterward.
         global current_pose
-        current_pose = value
-        _persist_pose()
+        if value.lower() in [p.lower() for p in config.AVATAR_PERSISTENT_POSES]:
+            current_pose = value
+            _persist_pose()
+        else:
+            current_pose = config.AVATAR_BASE_POSE
+            _persist_pose()
         await cognee.remember(speaker, message)
         # Let the LLM come up with a natural in-character comment
         response = await llm.chat(

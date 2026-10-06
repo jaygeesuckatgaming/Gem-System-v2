@@ -96,6 +96,8 @@ OSC_ACTIONS = []
 # Avatar pose/state system: the LLM can change its physical state via [ACTION: X] tags.
 # The base pose is "sitting" (idle); the rest mirror the OSC custom action values.
 AVATAR_BASE_POSE = "sitting"
+# Poses that persist (continuous, e.g. dancing). One-shot gestures revert to base pose.
+AVATAR_PERSISTENT_POSES = ["dance1", "dance", "dancing", "stop dancing"]
 AVATAR_ACTION_TAG_ENABLED = True   # Parse [ACTION: x] tags from LLM responses
 # Talking animation: sent via OSC when the avatar starts/stops speaking
 AVATAR_TALK_ANIMATION = "play_talking_animation"
