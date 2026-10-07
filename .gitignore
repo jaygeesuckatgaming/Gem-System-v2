@@ -61,6 +61,9 @@ background_state.json
 now_playing_state.txt
 current_pose.txt
 
+# Browser-use session dumps (regenerated each task)
+session-*.md
+
 # Qwen3-TTS (separate git repo)
 tts/Qwen3-TTS/
 
