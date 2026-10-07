@@ -928,37 +928,6 @@ async def handle_incoming_message(data: dict):
             await ssn.send_message("I don't have any songs downloaded yet.", targets=config.SSN_TARGETS)
         return
     
-    # Check for custom OSC action (intercept before LLM)
-    osc_action = match_osc_action(message)
-    if osc_action:
-        print(f"🎛️ OSC action detected: '{osc_action.get('phrase')}'")
-        address = osc_action.get('address', config.OSC_ADDRESS)
-        value = osc_action.get('value', '')
-        send_osc_message(address, value)
-        # Update the avatar's current pose ONLY for persistent (continuous) actions.
-        # One-shot gestures (wave, give the finger, etc.) revert to the base pose
-        # so the talk animation isn't incorrectly skipped afterward.
-        global current_pose
-        if value.lower() in [p.lower() for p in config.AVATAR_PERSISTENT_POSES]:
-            current_pose = value
-            _persist_pose()
-        else:
-            current_pose = config.AVATAR_BASE_POSE
-            _persist_pose()
-        await cognee.remember(speaker, message)
-        # Let the LLM come up with a natural in-character comment
-        response = await llm.chat(
-            f"The user said: '{message}'. You just performed the action '{osc_action.get('value')}'. "
-            f"Reply in character with a short, casual one-liner reacting to doing that action. "
-            f"Keep it under 2 sentences and don't mention OSC or commands.",
-            system_prompt=config.SYSTEM_PROMPT
-        )
-        print(f"[GEM] {response}")
-        await cognee.remember("Gem", response)
-        _last_ai_responses.append(html.unescape(response).strip())
-        await send_response(response)
-        return
-    
     # Check for OpenCode command (intercept before LLM)
     oc_command = extract_opencode_command(message)
     if oc_command and config.OPENCODE_ENABLED:
@@ -1060,17 +1029,10 @@ async def handle_incoming_message(data: dict):
     now = datetime.now(ZoneInfo("Asia/Bangkok"))
     system_prompt = f"{system_prompt}\n\nToday is {now.strftime('%A, %B %d, %Y')}. The current time is {now.strftime('%I:%M %p')}."
     
-    # Inject the avatar's current physical state and available actions
+    # Inject the avatar's current physical state
     if config.AVATAR_ACTION_TAG_ENABLED:
         state_context = get_avatar_state_context()
-        actions_list = get_avatar_action_list()
-        system_prompt = (
-            f"{system_prompt}\n\n{state_context}\n"
-            f"You may change your physical state by starting your reply with a tag like "
-            f"[ACTION: <action>]. Available actions: {actions_list}. "
-            f"Only use an action tag when you actually want to change your pose or "
-            f"perform a physical action (e.g. the user invited you to dance, wave, etc.)."
-        )
+        system_prompt = f"{system_prompt}\n\n{state_context}"
     
     if memory_context:
         system_prompt = f"{system_prompt}\n\n{memory_context}"
@@ -1080,16 +1042,26 @@ async def handle_incoming_message(data: dict):
     if chat_history:
         system_prompt = f"{system_prompt}\n\n{chat_history}"
     
-    response = await llm.chat(llm_message, system_prompt=system_prompt)
+    # Build tools for the LLM (animations via a single generic tool)
+    tools = get_animation_tools() if config.AVATAR_ACTION_TAG_ENABLED else None
+
+    # Let the LLM respond; it may also request an animation via the tool.
+    response, tool_calls = await llm.chat_with_tools(
+        llm_message, system_prompt=system_prompt, tools=tools
+    )
     print(f"[GEM] {response}")
-    
-    # Parse any [ACTION: x] tag from the response and act on it
-    if config.AVATAR_ACTION_TAG_ENABLED:
-        action, cleaned_response = parse_action_tag(response)
-        if action:
-            apply_action_tag(action)
-            response = cleaned_response or response
-    
+
+    # Execute any animation the LLM requested (question-vs-request is the LLM's job).
+    if tool_calls and config.AVATAR_ACTION_TAG_ENABLED:
+        for call in tool_calls:
+            action = extract_tool_action(call)
+            if action:
+                apply_action_tag(action)
+
+    # If the LLM only returned a tool call and no text, give it a fallback line.
+    if not response.strip() and tool_calls:
+        response = "Got it!"
+
     # Store AI response in memory
     await cognee.remember("Gem", response)
     
@@ -1678,49 +1650,10 @@ def send_osc_message(address: str, value) -> bool:
         return False
 
 
-def match_osc_action(text: str):
-    """Match a message against custom OSC actions.
-    Returns the matched action dict, or None.
-    """
-    text_lower = text.lower().strip()
-    for action in config.OSC_ACTIONS:
-        phrase = action.get('phrase', '').lower().strip()
-        if phrase and phrase in text_lower:
-            return action
-    return None
-
-
-def get_avatar_action_list() -> str:
-    """Return a comma-separated list of actions the avatar can perform, for the system prompt."""
-    actions = [config.AVATAR_BASE_POSE]
-    for action in config.OSC_ACTIONS:
-        value = action.get('value', '')
-        if value and value not in actions:
-            actions.append(value)
-    return ", ".join(actions)
-
-
 def get_avatar_state_context() -> str:
     """Return the avatar's current physical state for injection into the system prompt."""
     global current_pose
     return f"[Gem's current physical state: {current_pose}]"
-
-
-def parse_action_tag(text: str):
-    """Extract an [ACTION: x] or [x] tag from an LLM response.
-    Returns (action, cleaned_text) or (None, original_text)."""
-    import re
-    patterns = [
-        r'^\[ACTION\s*:\s*([^\]]+)\]\s*',
-        r'^\[([A-Za-z0-9 _-]+)\]\s*',
-    ]
-    for pattern in patterns:
-        m = re.match(pattern, text.strip())
-        if m:
-            action = m.group(1).strip().lower()
-            cleaned = text[m.end():].strip()
-            return action, cleaned
-    return None, text
 
 
 def apply_action_tag(action: str) -> bool:
@@ -1746,9 +1679,100 @@ def apply_action_tag(action: str) -> bool:
             print(f"[AVATAR] Action '{action_lower}' sent via OSC, pose updated.")
             return True
 
+    # No exact match — try fuzzy matching against known action values
+    resolved = resolve_action_value(action_lower)
+    if resolved and resolved != action_lower:
+        return apply_action_tag(resolved)
+
     # No match — leave pose unchanged
     print(f"[AVATAR] Unrecognized action '{action}', ignoring.")
     return False
+
+
+def _animation_enum_values() -> list:
+    """Collect the known animation names for the tool's enum (from OSC_ACTIONS)."""
+    values = []
+    for action in config.OSC_ACTIONS:
+        value = action.get('value', '')
+        if value and value not in values:
+            values.append(value)
+    return values
+
+
+def get_animation_tools():
+    """Build the LLM tool schema for triggering an avatar animation.
+
+    Uses a single generic `trigger_animation` tool. When OSC_ACTIONS defines
+    known values they're exposed as an enum; otherwise the action is a free
+    string the LLM picks itself (resolved via fuzzy match later).
+    """
+    enum_values = _animation_enum_values()
+
+    action_param: dict = {"type": "string", "description": "The animation to trigger."}
+    if enum_values:
+        action_param["enum"] = enum_values
+
+    return [{
+        "type": "function",
+        "function": {
+            "name": "trigger_animation",
+            "description": (
+                "Triggers a physical animation on the avatar. Only call this when "
+                "the user is explicitly asking you to perform the action right now. "
+                "Do NOT call it when the user is merely asking whether you CAN do "
+                "something, or asking a hypothetical question."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"action": action_param},
+                "required": ["action"],
+            },
+        },
+    }]
+
+
+def extract_tool_action(call: dict) -> str:
+    """Extract the animation name from a raw LLM tool-call dict, or '' if not ours."""
+    fn = call.get('function', {}) or {}
+    if fn.get('name') != 'trigger_animation':
+        return ''
+    try:
+        args = fn.get('arguments', {}) or {}
+        if isinstance(args, str):
+            import json as _json
+            args = _json.loads(args)
+    except Exception:
+        args = {}
+    return (args.get('action') or '').strip()
+
+
+def resolve_action_value(action: str) -> str:
+    """Fuzzy-match a free action string to the closest known OSC action value.
+
+    Returns the matched value (as stored in OSC_ACTIONS), or the original
+    action if nothing matches well enough.
+    """
+    if not config.OSC_ACTIONS:
+        return action
+
+    action_lower = action.lower().strip()
+    if not action_lower:
+        return action
+
+    # Exact match
+    for osc_action in config.OSC_ACTIONS:
+        value = osc_action.get('value', '')
+        if value.lower() == action_lower:
+            return value
+
+    # Substring / containment match (either direction)
+    for osc_action in config.OSC_ACTIONS:
+        value = osc_action.get('value', '')
+        v = value.lower()
+        if v and (v in action_lower or action_lower in v):
+            return value
+
+    return action
 
 
 def _persist_pose():

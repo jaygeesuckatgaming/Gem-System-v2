@@ -43,6 +43,31 @@ class LLMClient:
         except Exception as e:
             return f"Error: {e}"
 
+    async def chat_with_tools(self, message: str, system_prompt: Optional[str] = None,
+                              tools: Optional[List[Dict]] = None):
+        """Send a message with tool definitions and return (content, tool_calls).
+
+        Returns a tuple of (text_content, tool_calls). tool_calls is a list of
+        raw tool-call dicts (each with a 'function' containing 'name'/'arguments').
+        """
+        try:
+            messages = []
+            if system_prompt:
+                messages.append({'role': 'system', 'content': system_prompt})
+            messages.append({'role': 'user', 'content': message})
+
+            kwargs = {'model': self.model, 'messages': messages}
+            if tools:
+                kwargs['tools'] = tools
+
+            response = self.client.chat(**kwargs)
+            self.enabled = True
+            content = response['message'].get('content', '') or ''
+            tool_calls = response['message'].get('tool_calls', []) or []
+            return content, tool_calls
+        except Exception as e:
+            return f"Error: {e}", []
+
     async def chat_with_image(self, message: str, image_base64: str,
                               system_prompt: Optional[str] = None) -> str:
         """Send a message with an attached image (base64) to a multimodal model."""
