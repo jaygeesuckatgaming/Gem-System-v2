@@ -155,6 +155,7 @@ VOICE_SPEAKER_NAME = "JayGee"
 # Browser-Use (visible browser agent, captured by OBS for the stream)
 BROWSER_ENABLED = False
 BROWSER_LLM_PROVIDER = 'ollama'          # "ollama" (local) or "openai"
+BROWSER_OLLAMA_MODEL = ''                # empty = use OLLAMA_MODEL
 BROWSER_OPENAI_MODEL = 'gpt-4o'
 BROWSER_OPENAI_API_KEY = ''              # only needed if provider == "openai"
 BROWSER_HEADLESS = False                 # False = visible window for stream capture

@@ -50,7 +50,7 @@ vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISI
 weather = WeatherClient(latitude=config.WEATHER_LATITUDE, longitude=config.WEATHER_LONGITUDE)
 browser = BrowserClient(
     provider=getattr(config, 'BROWSER_LLM_PROVIDER', 'ollama'),
-    ollama_model=config.OLLAMA_MODEL,
+    ollama_model=getattr(config, 'BROWSER_OLLAMA_MODEL', '') or config.OLLAMA_MODEL,
     ollama_host=config.OLLAMA_BASE_URL,
     openai_model=getattr(config, 'BROWSER_OPENAI_MODEL', 'gpt-4o'),
     openai_api_key=getattr(config, 'BROWSER_OPENAI_API_KEY', ''),
@@ -361,6 +361,7 @@ def save_config():
             'VISION_NDI_SOURCE_NAME': (config.VISION_NDI_SOURCE_NAME, True),
             'BROWSER_ENABLED': (config.BROWSER_ENABLED, False),
             'BROWSER_LLM_PROVIDER': (config.BROWSER_LLM_PROVIDER, True),
+            'BROWSER_OLLAMA_MODEL': (config.BROWSER_OLLAMA_MODEL, True),
             'BROWSER_OPENAI_MODEL': (config.BROWSER_OPENAI_MODEL, True),
             'BROWSER_OPENAI_API_KEY': (config.BROWSER_OPENAI_API_KEY, True),
             'BROWSER_HEADLESS': (config.BROWSER_HEADLESS, False),
@@ -1320,6 +1321,7 @@ async def api_status():
             'enabled': config.BROWSER_ENABLED,
             'connected': browser.enabled,
             'llm_provider': config.BROWSER_LLM_PROVIDER,
+            'ollama_model': config.BROWSER_OLLAMA_MODEL,
             'openai_model': config.BROWSER_OPENAI_MODEL,
             'openai_api_key': config.BROWSER_OPENAI_API_KEY,
             'headless': config.BROWSER_HEADLESS,
@@ -1620,6 +1622,9 @@ async def api_update_settings():
     if 'browser_llm_provider' in data:
         config.BROWSER_LLM_PROVIDER = data['browser_llm_provider']
         browser.provider = data['browser_llm_provider']
+    if 'browser_ollama_model' in data:
+        config.BROWSER_OLLAMA_MODEL = data['browser_ollama_model']
+        browser.ollama_model = data['browser_ollama_model']
     if 'browser_openai_model' in data:
         config.BROWSER_OPENAI_MODEL = data['browser_openai_model']
         browser.openai_model = data['browser_openai_model']

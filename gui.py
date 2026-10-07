@@ -2068,6 +2068,13 @@ class ControlPanel(ctk.CTk):
         self.browser_provider_combo = ctk.CTkComboBox(self.browser_tab, values=["ollama", "openai"], width=200)
         self.browser_provider_combo.pack(anchor="w", padx=20, pady=10)
         
+        # Ollama model (used when provider = ollama)
+        ollama_model_label = ctk.CTkLabel(self.browser_tab, text="Ollama Model (empty = use chat model):", font=ctk.CTkFont(size=14))
+        ollama_model_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.browser_ollama_model_entry = ctk.CTkEntry(self.browser_tab)
+        self.browser_ollama_model_entry.pack(fill="x", padx=20, pady=10)
+        
         # OpenAI model
         openai_model_label = ctk.CTkLabel(self.browser_tab, text="OpenAI Model:", font=ctk.CTkFont(size=14))
         openai_model_label.pack(anchor="w", padx=20, pady=(10, 0))
@@ -2137,6 +2144,8 @@ class ControlPanel(ctk.CTk):
                 
                 self.browser_enabled_var.set(br.get('enabled', False))
                 self.browser_provider_combo.set(br.get('llm_provider', 'ollama'))
+                self.browser_ollama_model_entry.delete(0, "end")
+                self.browser_ollama_model_entry.insert(0, br.get('ollama_model', ''))
                 self.browser_openai_model_entry.delete(0, "end")
                 self.browser_openai_model_entry.insert(0, br.get('openai_model', ''))
                 self.browser_api_key_entry.delete(0, "end")
@@ -2207,6 +2216,7 @@ class ControlPanel(ctk.CTk):
             payload = {
                 'browser_enabled': self.browser_enabled_var.get(),
                 'browser_llm_provider': self.browser_provider_combo.get().strip(),
+                'browser_ollama_model': self.browser_ollama_model_entry.get().strip(),
                 'browser_openai_model': self.browser_openai_model_entry.get().strip(),
                 'browser_openai_api_key': self.browser_api_key_entry.get().strip(),
                 'browser_headless': self.browser_headless_var.get(),

@@ -181,7 +181,9 @@ class BrowserClient:
         session = self._get_session()
 
         try:
-            agent = Agent(task=task, llm=llm, browser_session=session)
+            # use_thinking=False drops the 'thinking' field from the schema,
+            # slightly simplifying the output smaller local models must emit.
+            agent = Agent(task=task, llm=llm, browser_session=session, use_thinking=False)
             result = await agent.run()
         except Exception as e:
             print(f"Browser task failed: {e}")
