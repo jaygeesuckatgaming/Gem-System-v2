@@ -57,6 +57,8 @@ browser = BrowserClient(
     headless=getattr(config, 'BROWSER_HEADLESS', False),
     viewport_width=getattr(config, 'BROWSER_VIEWPORT_WIDTH', 1280),
     viewport_height=getattr(config, 'BROWSER_VIEWPORT_HEIGHT', 720),
+    window_x=getattr(config, 'BROWSER_WINDOW_X', 0),
+    window_y=getattr(config, 'BROWSER_WINDOW_Y', 0),
 )
 
 # Record downloaded songs to memory so Gem remembers them
@@ -364,6 +366,8 @@ def save_config():
             'BROWSER_HEADLESS': (config.BROWSER_HEADLESS, False),
             'BROWSER_VIEWPORT_WIDTH': (config.BROWSER_VIEWPORT_WIDTH, False),
             'BROWSER_VIEWPORT_HEIGHT': (config.BROWSER_VIEWPORT_HEIGHT, False),
+            'BROWSER_WINDOW_X': (config.BROWSER_WINDOW_X, False),
+            'BROWSER_WINDOW_Y': (config.BROWSER_WINDOW_Y, False),
             'GAME_AGENT_ENABLED': (config.GAME_AGENT_ENABLED, False),
             'GAME_AGENT_INTERVAL_S': (config.GAME_AGENT_INTERVAL_S, False),
             'GAME_AGENT_MOVE_ADDRESS': (config.GAME_AGENT_MOVE_ADDRESS, True),
@@ -1320,7 +1324,9 @@ async def api_status():
             'openai_api_key': config.BROWSER_OPENAI_API_KEY,
             'headless': config.BROWSER_HEADLESS,
             'viewport_width': config.BROWSER_VIEWPORT_WIDTH,
-            'viewport_height': config.BROWSER_VIEWPORT_HEIGHT
+            'viewport_height': config.BROWSER_VIEWPORT_HEIGHT,
+            'window_x': config.BROWSER_WINDOW_X,
+            'window_y': config.BROWSER_WINDOW_Y
         },
         'game_agent': {
             'enabled': config.GAME_AGENT_ENABLED,
@@ -1330,6 +1336,26 @@ async def api_status():
             'system_prompt': config.GAME_AGENT_SYSTEM_PROMPT
         }
     })
+
+
+@app.route('/api/browser/monitors', methods=['GET'])
+async def api_browser_monitors():
+    """List available monitors (for choosing which display the browser opens on)."""
+    monitors = []
+    try:
+        from screeninfo import get_monitors
+        for m in get_monitors():
+            monitors.append({
+                'name': m.name,
+                'is_primary': bool(m.is_primary),
+                'x': int(m.x),
+                'y': int(m.y),
+                'width': int(m.width),
+                'height': int(m.height),
+            })
+    except Exception as e:
+        return jsonify({'status': 'error', 'error': str(e), 'monitors': []}), 500
+    return jsonify({'status': 'ok', 'monitors': monitors})
 
 
 @app.route('/api/audio/devices', methods=['GET'])
@@ -1609,6 +1635,12 @@ async def api_update_settings():
     if 'browser_viewport_height' in data:
         config.BROWSER_VIEWPORT_HEIGHT = data['browser_viewport_height']
         browser.viewport_height = data['browser_viewport_height']
+    if 'browser_window_x' in data:
+        config.BROWSER_WINDOW_X = data['browser_window_x']
+        browser.window_x = data['browser_window_x']
+    if 'browser_window_y' in data:
+        config.BROWSER_WINDOW_Y = data['browser_window_y']
+        browser.window_y = data['browser_window_y']
     if 'game_agent_enabled' in data:
         config.GAME_AGENT_ENABLED = data['game_agent_enabled']
     if 'game_agent_interval_s' in data:

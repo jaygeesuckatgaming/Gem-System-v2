@@ -2100,6 +2100,29 @@ class ControlPanel(ctk.CTk):
         self.browser_height_entry = ctk.CTkEntry(viewport_frame, width=100, placeholder_text="Height")
         self.browser_height_entry.pack(side="left")
         
+        # Window position (for OBS region capture)
+        pos_label = ctk.CTkLabel(self.browser_tab, text="Window Position (X, Y):", font=ctk.CTkFont(size=14))
+        pos_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        pos_frame = ctk.CTkFrame(self.browser_tab, fg_color="transparent")
+        pos_frame.pack(fill="x", padx=20, pady=10)
+        
+        self.browser_x_entry = ctk.CTkEntry(pos_frame, width=100, placeholder_text="X")
+        self.browser_x_entry.pack(side="left", padx=(0, 10))
+        
+        self.browser_y_entry = ctk.CTkEntry(pos_frame, width=100, placeholder_text="Y")
+        self.browser_y_entry.pack(side="left")
+        
+        # Monitor selector (auto-fills X/Y)
+        monitor_label = ctk.CTkLabel(self.browser_tab, text="Open on Monitor:", font=ctk.CTkFont(size=14))
+        monitor_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.browser_monitor_combo = ctk.CTkComboBox(self.browser_tab, values=["Loading..."], width=300, command=self.on_monitor_selected)
+        self.browser_monitor_combo.pack(anchor="w", padx=20, pady=10)
+        
+        refresh_monitors_btn = ctk.CTkButton(self.browser_tab, text="Refresh Monitors", width=160, command=self.refresh_monitors)
+        refresh_monitors_btn.pack(anchor="w", padx=20, pady=(0, 10))
+        
         # Save button
         save_btn = ctk.CTkButton(self.browser_tab, text="Save Browser Settings", command=self.save_browser_settings)
         save_btn.pack(pady=20)
@@ -2123,11 +2146,54 @@ class ControlPanel(ctk.CTk):
                 self.browser_width_entry.insert(0, str(br.get('viewport_width', 1280)))
                 self.browser_height_entry.delete(0, "end")
                 self.browser_height_entry.insert(0, str(br.get('viewport_height', 720)))
+                self.browser_x_entry.delete(0, "end")
+                self.browser_x_entry.insert(0, str(br.get('window_x', 0)))
+                self.browser_y_entry.delete(0, "end")
+                self.browser_y_entry.insert(0, str(br.get('window_y', 0)))
                 
                 connected = br.get('connected', False)
                 self.browser_status.configure(text=f"Status: {'Connected' if connected else 'Not connected'}")
         except Exception as e:
             print(f"Failed to load Browser Use settings: {e}")
+        
+        self.refresh_monitors()
+    
+    def refresh_monitors(self):
+        """Populate the monitor dropdown from the server."""
+        self._monitors = []
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/browser/monitors", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                self._monitors = data.get('monitors', [])
+                labels = []
+                for i, m in enumerate(self._monitors):
+                    star = " (primary)" if m.get('is_primary') else ""
+                    labels.append(f"{i}: {m['width']}x{m['height']} @ ({m['x']},{m['y']}){star}")
+                if labels:
+                    self.browser_monitor_combo.configure(values=labels)
+                    self.browser_monitor_combo.set(labels[0])
+                else:
+                    self.browser_monitor_combo.configure(values=["No monitors found"])
+                    self.browser_monitor_combo.set("No monitors found")
+        except Exception as e:
+            print(f"Failed to load monitors: {e}")
+    
+    def on_monitor_selected(self, choice):
+        """Auto-fill X/Y from the selected monitor's top-left coordinates."""
+        if not getattr(self, '_monitors', None):
+            return
+        # choice format: "0: 1920x1080 @ (1920,-110) (primary)"
+        try:
+            idx = int(choice.split(':', 1)[0].strip())
+        except (ValueError, IndexError):
+            return
+        if idx < len(self._monitors):
+            m = self._monitors[idx]
+            self.browser_x_entry.delete(0, "end")
+            self.browser_x_entry.insert(0, str(m['x']))
+            self.browser_y_entry.delete(0, "end")
+            self.browser_y_entry.insert(0, str(m['y']))
     
     def save_browser_settings(self):
         """Save Browser Use settings to server"""
@@ -2145,7 +2211,9 @@ class ControlPanel(ctk.CTk):
                 'browser_openai_api_key': self.browser_api_key_entry.get().strip(),
                 'browser_headless': self.browser_headless_var.get(),
                 'browser_viewport_width': _as_int(self.browser_width_entry, 1280),
-                'browser_viewport_height': _as_int(self.browser_height_entry, 720)
+                'browser_viewport_height': _as_int(self.browser_height_entry, 720),
+                'browser_window_x': _as_int(self.browser_x_entry, 0),
+                'browser_window_y': _as_int(self.browser_y_entry, 0)
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)

@@ -64,6 +64,9 @@ current_pose.txt
 # Browser-use session dumps (regenerated each task)
 session-*.md
 
+# Browser-use Chrome profile directory (runtime state)
+browser_profile/
+
 # Qwen3-TTS (separate git repo)
 tts/Qwen3-TTS/
 

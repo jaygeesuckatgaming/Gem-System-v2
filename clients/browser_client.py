@@ -90,7 +90,9 @@ class BrowserClient:
                  openai_api_key: str = "",
                  headless: bool = False,
                  viewport_width: int = 1280,
-                 viewport_height: int = 720):
+                 viewport_height: int = 720,
+                 window_x: int = 0,
+                 window_y: int = 0):
         self.provider = provider.lower()
         self.ollama_model = ollama_model
         self.ollama_host = ollama_host
@@ -99,6 +101,8 @@ class BrowserClient:
         self.headless = headless
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+        self.window_x = window_x
+        self.window_y = window_y
         self.enabled = False
         self._session = None
         self._llm = None
@@ -120,10 +124,31 @@ class BrowserClient:
         from browser_use import BrowserSession, BrowserProfile
         from browser_use.browser.profile import ViewportSize
 
+        # A fixed user_data_dir keeps the same browser process/profile across
+        # tasks (persistent cookies, logins, and a single stable window).
+        profile_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "browser_profile",
+        )
+
         profile = BrowserProfile(
             headless=self.headless,
             disable_security=True,
+            keep_alive=True,  # don't kill the browser when an agent finishes
+            user_data_dir=profile_dir,
             viewport=ViewportSize(width=self.viewport_width, height=self.viewport_height),
+            # An explicit window_size forces Chrome to use --window-size instead
+            # of --start-maximized (which would ignore --window-position and snap
+            # to the primary display).
+            window_size=ViewportSize(width=self.viewport_width, height=self.viewport_height),
+            # window_position defaults to ViewportSize(0,0) and its injected
+            # --window-position=0,0 would override our raw arg (dedup keeps the
+            # last). Set it to None so only our raw arg below takes effect.
+            window_position=None,
+            # window_position uses ViewportSize (ge=0), so it can't express a
+            # negative offset for a monitor left of the primary. Use the raw
+            # Chrome CLI arg instead, which accepts any coordinate.
+            args=[f"--window-position={self.window_x},{self.window_y}"],
         )
         return BrowserSession(browser_profile=profile)
 

@@ -160,6 +160,8 @@ BROWSER_OPENAI_API_KEY = ''              # only needed if provider == "openai"
 BROWSER_HEADLESS = False                 # False = visible window for stream capture
 BROWSER_VIEWPORT_WIDTH = 1280
 BROWSER_VIEWPORT_HEIGHT = 720
+BROWSER_WINDOW_X = 0                     # fixed window position (pixels) for OBS region capture
+BROWSER_WINDOW_Y = 0
 # Blocked terms/domains the browser agent may not navigate to (case-insensitive).
 # Add porn, gambling, malware, and other disallowed sites/keywords here.
 BROWSER_BLOCKED_TERMS = [
