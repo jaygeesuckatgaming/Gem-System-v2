@@ -56,6 +56,7 @@ class ControlPanel(ctk.CTk):
         self.neurosync_tab = self.tabview.add("Neurosync")
         self.osc_tab = self.tabview.add("OSC")
         self.opencode_tab = self.tabview.add("OpenCode")
+        self.browser_tab = self.tabview.add("Browser Use")
         self.vision_tab = self.tabview.add("Vision")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
         self.extras_tab = self.tabview.add("Extras")
@@ -73,6 +74,7 @@ class ControlPanel(ctk.CTk):
         self.build_neurosync_tab()
         self.build_osc_tab()
         self.build_opencode_tab()
+        self.build_browser_tab()
         self.build_vision_tab()
         self.build_ssn_tab()
         self.build_extras_tab()
@@ -2044,6 +2046,114 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to save OpenCode settings: {e}")
     
+    # ==================== BROWSER USE TAB ====================
+    def build_browser_tab(self):
+        """Build the Browser Use tab"""
+        title = ctk.CTkLabel(self.browser_tab, text="Browser Use", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+        
+        # Connection status
+        self.browser_status = ctk.CTkLabel(self.browser_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.browser_status.pack(anchor="w", padx=20, pady=5)
+        
+        # Enable toggle
+        self.browser_enabled_var = ctk.BooleanVar(value=False)
+        enable_check = ctk.CTkCheckBox(self.browser_tab, text="Enable Browser Use", variable=self.browser_enabled_var)
+        enable_check.pack(anchor="w", padx=20, pady=10)
+        
+        # LLM provider
+        provider_label = ctk.CTkLabel(self.browser_tab, text="LLM Provider:", font=ctk.CTkFont(size=14))
+        provider_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.browser_provider_combo = ctk.CTkComboBox(self.browser_tab, values=["ollama", "openai"], width=200)
+        self.browser_provider_combo.pack(anchor="w", padx=20, pady=10)
+        
+        # OpenAI model
+        openai_model_label = ctk.CTkLabel(self.browser_tab, text="OpenAI Model:", font=ctk.CTkFont(size=14))
+        openai_model_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.browser_openai_model_entry = ctk.CTkEntry(self.browser_tab)
+        self.browser_openai_model_entry.pack(fill="x", padx=20, pady=10)
+        
+        # OpenAI API key
+        api_key_label = ctk.CTkLabel(self.browser_tab, text="OpenAI API Key (only for openai provider):", font=ctk.CTkFont(size=14))
+        api_key_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        self.browser_api_key_entry = ctk.CTkEntry(self.browser_tab, show="*")
+        self.browser_api_key_entry.pack(fill="x", padx=20, pady=10)
+        
+        # Headless toggle
+        self.browser_headless_var = ctk.BooleanVar(value=False)
+        headless_check = ctk.CTkCheckBox(self.browser_tab, text="Headless (no visible window)", variable=self.browser_headless_var)
+        headless_check.pack(anchor="w", padx=20, pady=10)
+        
+        # Viewport size
+        viewport_label = ctk.CTkLabel(self.browser_tab, text="Viewport Size:", font=ctk.CTkFont(size=14))
+        viewport_label.pack(anchor="w", padx=20, pady=(10, 0))
+        
+        viewport_frame = ctk.CTkFrame(self.browser_tab, fg_color="transparent")
+        viewport_frame.pack(fill="x", padx=20, pady=10)
+        
+        self.browser_width_entry = ctk.CTkEntry(viewport_frame, width=100, placeholder_text="Width")
+        self.browser_width_entry.pack(side="left", padx=(0, 10))
+        
+        self.browser_height_entry = ctk.CTkEntry(viewport_frame, width=100, placeholder_text="Height")
+        self.browser_height_entry.pack(side="left")
+        
+        # Save button
+        save_btn = ctk.CTkButton(self.browser_tab, text="Save Browser Settings", command=self.save_browser_settings)
+        save_btn.pack(pady=20)
+    
+    def load_browser_settings(self):
+        """Load Browser Use settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                br = data.get('browser', {})
+                
+                self.browser_enabled_var.set(br.get('enabled', False))
+                self.browser_provider_combo.set(br.get('llm_provider', 'ollama'))
+                self.browser_openai_model_entry.delete(0, "end")
+                self.browser_openai_model_entry.insert(0, br.get('openai_model', ''))
+                self.browser_api_key_entry.delete(0, "end")
+                self.browser_api_key_entry.insert(0, br.get('openai_api_key', ''))
+                self.browser_headless_var.set(br.get('headless', False))
+                self.browser_width_entry.delete(0, "end")
+                self.browser_width_entry.insert(0, str(br.get('viewport_width', 1280)))
+                self.browser_height_entry.delete(0, "end")
+                self.browser_height_entry.insert(0, str(br.get('viewport_height', 720)))
+                
+                connected = br.get('connected', False)
+                self.browser_status.configure(text=f"Status: {'Connected' if connected else 'Not connected'}")
+        except Exception as e:
+            print(f"Failed to load Browser Use settings: {e}")
+    
+    def save_browser_settings(self):
+        """Save Browser Use settings to server"""
+        try:
+            def _as_int(entry, default):
+                try:
+                    return int(entry.get().strip())
+                except (ValueError, AttributeError):
+                    return default
+            
+            payload = {
+                'browser_enabled': self.browser_enabled_var.get(),
+                'browser_llm_provider': self.browser_provider_combo.get().strip(),
+                'browser_openai_model': self.browser_openai_model_entry.get().strip(),
+                'browser_openai_api_key': self.browser_api_key_entry.get().strip(),
+                'browser_headless': self.browser_headless_var.get(),
+                'browser_viewport_width': _as_int(self.browser_width_entry, 1280),
+                'browser_viewport_height': _as_int(self.browser_height_entry, 720)
+            }
+            
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("Browser settings saved")
+        except Exception as e:
+            print(f"Failed to save Browser settings: {e}")
+    
     # ==================== VISION TAB ====================
     def build_vision_tab(self):
         """Build the Vision tab"""
@@ -2426,6 +2536,7 @@ class ControlPanel(ctk.CTk):
         self.load_ssn_settings()
         self.load_neurosync_settings()
         self.load_opencode_settings()
+        self.load_browser_settings()
         self.load_vision_settings()
         self.load_osc_actions()
         self.load_idle_settings()

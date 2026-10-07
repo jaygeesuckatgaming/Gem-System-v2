@@ -39,6 +39,11 @@ python-osc==1.10.2
 # Playwright (browser automation)
 playwright==1.62.0
 
+# Browser-Use (visible browser agent for the livestream)
+browser-use
+langchain-openai
+langchain-ollama
+
 # ML / TTS support (StyleTTS2 + Pocket TTS dependencies)
 numpy==2.4.6
 scipy==1.17.1

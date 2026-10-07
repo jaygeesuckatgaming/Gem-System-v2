@@ -152,6 +152,23 @@ LAYA_ANIMATION_MAP = []
 # Voice input speaker name (used for memory storage of microphone input)
 VOICE_SPEAKER_NAME = "JayGee"
 
+# Browser-Use (visible browser agent, captured by OBS for the stream)
+BROWSER_ENABLED = False
+BROWSER_LLM_PROVIDER = 'ollama'          # "ollama" (local) or "openai"
+BROWSER_OPENAI_MODEL = 'gpt-4o'
+BROWSER_OPENAI_API_KEY = ''              # only needed if provider == "openai"
+BROWSER_HEADLESS = False                 # False = visible window for stream capture
+BROWSER_VIEWPORT_WIDTH = 1280
+BROWSER_VIEWPORT_HEIGHT = 720
+# Blocked terms/domains the browser agent may not navigate to (case-insensitive).
+# Add porn, gambling, malware, and other disallowed sites/keywords here.
+BROWSER_BLOCKED_TERMS = [
+    'pornhub', 'xvideos', 'xnxx', 'redtube', 'youporn', 'onlyfans',
+    'chaturbate', 'porn', 'xxx', 'nsfw', 'hentai', 'adult',
+    'gambling', 'casino', 'bet365', 'betway', 'stake',
+    'malware', 'phishing', 'ransomware',
+]
+
 # OpenCode API
 OPENCODE_ENABLED = True
 OPENCODE_API_URL = "http://localhost:4096"

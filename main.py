@@ -20,6 +20,7 @@ from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, 
 from clients.audio_player import AudioPlayer
 from clients.opencode_client import format_opencode_response
 from clients.idle_manager import IdleManager
+from clients.browser_client import BrowserClient
 
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
@@ -47,6 +48,16 @@ music.twitch_checker.llm_parse_function = llm.chat_sync
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 weather = WeatherClient(latitude=config.WEATHER_LATITUDE, longitude=config.WEATHER_LONGITUDE)
+browser = BrowserClient(
+    provider=getattr(config, 'BROWSER_LLM_PROVIDER', 'ollama'),
+    ollama_model=config.OLLAMA_MODEL,
+    ollama_host=config.OLLAMA_BASE_URL,
+    openai_model=getattr(config, 'BROWSER_OPENAI_MODEL', 'gpt-4o'),
+    openai_api_key=getattr(config, 'BROWSER_OPENAI_API_KEY', ''),
+    headless=getattr(config, 'BROWSER_HEADLESS', False),
+    viewport_width=getattr(config, 'BROWSER_VIEWPORT_WIDTH', 1280),
+    viewport_height=getattr(config, 'BROWSER_VIEWPORT_HEIGHT', 720),
+)
 
 # Record downloaded songs to memory so Gem remembers them
 def _on_download_complete(query: str):
@@ -346,6 +357,13 @@ def save_config():
             'VISION_IMAGE_SOURCE': (config.VISION_IMAGE_SOURCE, True),
             'VISION_CAMERA_INDEX': (config.VISION_CAMERA_INDEX, False),
             'VISION_NDI_SOURCE_NAME': (config.VISION_NDI_SOURCE_NAME, True),
+            'BROWSER_ENABLED': (config.BROWSER_ENABLED, False),
+            'BROWSER_LLM_PROVIDER': (config.BROWSER_LLM_PROVIDER, True),
+            'BROWSER_OPENAI_MODEL': (config.BROWSER_OPENAI_MODEL, True),
+            'BROWSER_OPENAI_API_KEY': (config.BROWSER_OPENAI_API_KEY, True),
+            'BROWSER_HEADLESS': (config.BROWSER_HEADLESS, False),
+            'BROWSER_VIEWPORT_WIDTH': (config.BROWSER_VIEWPORT_WIDTH, False),
+            'BROWSER_VIEWPORT_HEIGHT': (config.BROWSER_VIEWPORT_HEIGHT, False),
             'GAME_AGENT_ENABLED': (config.GAME_AGENT_ENABLED, False),
             'GAME_AGENT_INTERVAL_S': (config.GAME_AGENT_INTERVAL_S, False),
             'GAME_AGENT_MOVE_ADDRESS': (config.GAME_AGENT_MOVE_ADDRESS, True),
@@ -409,6 +427,14 @@ def save_config():
             content = options_pattern.sub(f'LAYA_ANIMATION_OPTIONS = {options_literal}', content)
         else:
             content += f'\nLAYA_ANIMATION_OPTIONS = {options_literal}\n'
+
+        # Persist BROWSER_BLOCKED_TERMS (a list of strings, handled separately)
+        blocked_literal = pprint.pformat(config.BROWSER_BLOCKED_TERMS, width=120)
+        blocked_pattern = re.compile(r'^BROWSER_BLOCKED_TERMS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
+        if blocked_pattern.search(content):
+            content = blocked_pattern.sub(f'BROWSER_BLOCKED_TERMS = {blocked_literal}', content)
+        else:
+            content += f'\nBROWSER_BLOCKED_TERMS = {blocked_literal}\n'
 
         with open(CONFIG_FILE, "w") as f:
             f.write(content)
@@ -1042,21 +1068,46 @@ async def handle_incoming_message(data: dict):
     if chat_history:
         system_prompt = f"{system_prompt}\n\n{chat_history}"
     
-    # Build tools for the LLM (animations via a single generic tool)
-    tools = get_animation_tools() if config.AVATAR_ACTION_TAG_ENABLED else None
+    # Build tools for the LLM (animations + browser via generic tools)
+    tools = []
+    if config.AVATAR_ACTION_TAG_ENABLED:
+        tools.extend(get_animation_tools())
+    if browser.enabled and getattr(config, 'BROWSER_ENABLED', False):
+        tools.extend(get_browser_tools())
 
-    # Let the LLM respond; it may also request an animation via the tool.
+    # Let the LLM respond; it may also request an animation or a browse task.
     response, tool_calls = await llm.chat_with_tools(
-        llm_message, system_prompt=system_prompt, tools=tools
+        llm_message, system_prompt=system_prompt, tools=tools or None
     )
     print(f"[GEM] {response}")
 
-    # Execute any animation the LLM requested (question-vs-request is the LLM's job).
-    if tool_calls and config.AVATAR_ACTION_TAG_ENABLED:
-        for call in tool_calls:
-            action = extract_tool_action(call)
-            if action:
-                apply_action_tag(action)
+    # Execute any tools the LLM requested (question-vs-request is the LLM's job).
+    browser_result = None
+    for call in tool_calls:
+        action = extract_tool_action(call)
+        if action:
+            apply_action_tag(action)
+            continue
+
+        browse_task = extract_browser_task(call)
+        if browse_task:
+            blocked = find_blocked_term(browse_task)
+            if blocked:
+                print(f"[BROWSER] Blocked task containing '{blocked}': {browse_task}")
+                browser_result = "Blocked. This request was refused because it matched a disallowed topic."
+            else:
+                browser_result = await browser.run_task(browse_task)
+
+    # If a browse task ran, hand its result back to the LLM for a chat reply.
+    if browser_result is not None:
+        followup = await llm.chat(
+            f"You browsed the web for: '{browser_result}'. "
+            f"Summarize the outcome in character as Gem, in 1-3 sentences, "
+            f"for the person who asked.",
+            system_prompt=system_prompt,
+        )
+        if followup and not followup.startswith("Error"):
+            response = followup
 
     # If the LLM only returned a tool call and no text, give it a fallback line.
     if not response.strip() and tool_calls:
@@ -1260,6 +1311,16 @@ async def api_status():
             'image_source': config.VISION_IMAGE_SOURCE,
             'camera_index': config.VISION_CAMERA_INDEX,
             'ndi_source_name': config.VISION_NDI_SOURCE_NAME
+        },
+        'browser': {
+            'enabled': config.BROWSER_ENABLED,
+            'connected': browser.enabled,
+            'llm_provider': config.BROWSER_LLM_PROVIDER,
+            'openai_model': config.BROWSER_OPENAI_MODEL,
+            'openai_api_key': config.BROWSER_OPENAI_API_KEY,
+            'headless': config.BROWSER_HEADLESS,
+            'viewport_width': config.BROWSER_VIEWPORT_WIDTH,
+            'viewport_height': config.BROWSER_VIEWPORT_HEIGHT
         },
         'game_agent': {
             'enabled': config.GAME_AGENT_ENABLED,
@@ -1528,6 +1589,26 @@ async def api_update_settings():
         config.VISION_CAMERA_INDEX = data['vision_camera_index']
     if 'vision_ndi_source_name' in data:
         config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
+    if 'browser_enabled' in data:
+        config.BROWSER_ENABLED = data['browser_enabled']
+    if 'browser_llm_provider' in data:
+        config.BROWSER_LLM_PROVIDER = data['browser_llm_provider']
+        browser.provider = data['browser_llm_provider']
+    if 'browser_openai_model' in data:
+        config.BROWSER_OPENAI_MODEL = data['browser_openai_model']
+        browser.openai_model = data['browser_openai_model']
+    if 'browser_openai_api_key' in data:
+        config.BROWSER_OPENAI_API_KEY = data['browser_openai_api_key']
+        browser.openai_api_key = data['browser_openai_api_key']
+    if 'browser_headless' in data:
+        config.BROWSER_HEADLESS = data['browser_headless']
+        browser.headless = data['browser_headless']
+    if 'browser_viewport_width' in data:
+        config.BROWSER_VIEWPORT_WIDTH = data['browser_viewport_width']
+        browser.viewport_width = data['browser_viewport_width']
+    if 'browser_viewport_height' in data:
+        config.BROWSER_VIEWPORT_HEIGHT = data['browser_viewport_height']
+        browser.viewport_height = data['browser_viewport_height']
     if 'game_agent_enabled' in data:
         config.GAME_AGENT_ENABLED = data['game_agent_enabled']
     if 'game_agent_interval_s' in data:
@@ -1744,6 +1825,58 @@ def extract_tool_action(call: dict) -> str:
     except Exception:
         args = {}
     return (args.get('action') or '').strip()
+
+
+def get_browser_tools():
+    """Build the LLM tool schema for the browser-use agent."""
+    blocked = ", ".join(getattr(config, 'BROWSER_BLOCKED_TERMS', [])) or "none"
+    return [{
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": (
+                "Open a web browser and perform a task for the user, such as "
+                "looking something up, reading a page, or navigating a site. "
+                "Only call this when the user is explicitly asking you to browse "
+                "the web or look something up right now. "
+                f"Refuse requests involving these disallowed topics: {blocked}."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "A clear, self-contained description of what to do in the browser.",
+                    },
+                },
+                "required": ["task"],
+            },
+        },
+    }]
+
+
+def find_blocked_term(text: str) -> str:
+    """Return the first blocked term found in text (case-insensitive), or ''."""
+    text_lower = text.lower()
+    for term in getattr(config, 'BROWSER_BLOCKED_TERMS', []):
+        if term.lower() in text_lower:
+            return term
+    return ''
+
+
+def extract_browser_task(call: dict) -> str:
+    """Extract the task string from a raw LLM tool-call dict, or '' if not ours."""
+    fn = call.get('function', {}) or {}
+    if fn.get('name') != 'browse_web':
+        return ''
+    try:
+        args = fn.get('arguments', {}) or {}
+        if isinstance(args, str):
+            import json as _json
+            args = _json.loads(args)
+    except Exception:
+        args = {}
+    return (args.get('task') or '').strip()
 
 
 def resolve_action_value(action: str) -> str:
@@ -2035,6 +2168,10 @@ async def startup():
     if config.VISION_ENABLED:
         await vision.check_connection()
     
+    # Check browser-use (if enabled)
+    if getattr(config, 'BROWSER_ENABLED', False):
+        browser.check_connection()
+    
     # Start background tasks
     await start_background_tasks()
 
@@ -2044,6 +2181,10 @@ async def shutdown():
     """Save state on server shutdown"""
     print("Shutting down Gem-System v2...")
     music.save_background_state()
+    try:
+        await browser.close()
+    except Exception:
+        pass
 
 
 if __name__ == '__main__':
