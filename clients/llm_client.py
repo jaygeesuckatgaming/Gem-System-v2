@@ -3,6 +3,8 @@ Ollama LLM Client
 Handles chat completions with local Ollama server
 """
 
+import os
+import json
 import ollama
 from typing import Optional, List, Dict
 
@@ -13,6 +15,39 @@ class LLMClient:
         self.base_url = base_url
         self.client = ollama.Client(host=base_url)
         self.enabled = False
+
+        # Token usage tracking (cumulative + last request)
+        self.prompt_tokens_total = 0
+        self.eval_tokens_total = 0
+        self.last_prompt_tokens = 0
+        self.last_eval_tokens = 0
+        self.token_state_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "token_usage_state.json",
+        )
+
+    def _record_token_usage(self, response):
+        """Accumulate token counts from an Ollama response and persist to disk."""
+        prompt_tokens = getattr(response, 'prompt_eval_count', None) or 0
+        eval_tokens = getattr(response, 'eval_count', None) or 0
+
+        self.last_prompt_tokens = prompt_tokens
+        self.last_eval_tokens = eval_tokens
+        self.prompt_tokens_total += prompt_tokens
+        self.eval_tokens_total += eval_tokens
+
+        state = {
+            'last_prompt_tokens': self.last_prompt_tokens,
+            'last_eval_tokens': self.last_eval_tokens,
+            'total_prompt_tokens': self.prompt_tokens_total,
+            'total_eval_tokens': self.eval_tokens_total,
+            'model': self.model,
+        }
+        try:
+            with open(self.token_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f)
+        except Exception as e:
+            print(f"[LLM] Failed to write token state: {e}")
     
     async def check_connection(self) -> bool:
         """Test connection to Ollama"""
@@ -39,6 +74,7 @@ class LLMClient:
             
             response = self.client.chat(model=self.model, messages=messages)
             self.enabled = True
+            self._record_token_usage(response)
             return response['message']['content']
         except Exception as e:
             return f"Error: {e}"
@@ -62,6 +98,7 @@ class LLMClient:
 
             response = self.client.chat(**kwargs)
             self.enabled = True
+            self._record_token_usage(response)
             content = response['message'].get('content', '') or ''
             tool_calls = response['message'].get('tool_calls', []) or []
             return content, tool_calls
@@ -82,6 +119,7 @@ class LLMClient:
             })
             response = self.client.chat(model=self.model, messages=messages)
             self.enabled = True
+            self._record_token_usage(response)
             return response['message']['content']
         except Exception as e:
             return f"Error: {e}"
@@ -96,6 +134,7 @@ class LLMClient:
             
             response = self.client.chat(model=self.model, messages=messages)
             self.enabled = True
+            self._record_token_usage(response)
             return response['message']['content']
         except Exception as e:
             return ""

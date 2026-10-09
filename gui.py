@@ -3011,6 +3011,24 @@ class ControlPanel(ctk.CTk):
         np_btn = ctk.CTkButton(np_frame, text="Open Now Playing Overlay", command=self.open_now_playing_overlay)
         np_btn.pack(anchor="w", padx=20, pady=(0, 15))
 
+        # --- Token Usage Overlay ---
+        tu_frame = ctk.CTkFrame(self.extras_tab)
+        tu_frame.pack(fill="x", padx=20, pady=10)
+
+        tu_label = ctk.CTkLabel(tu_frame, text="Token Usage Overlay", font=ctk.CTkFont(size=16, weight="bold"))
+        tu_label.pack(anchor="w", padx=20, pady=(15, 5))
+
+        tu_desc = ctk.CTkLabel(
+            tu_frame,
+            text="Always-on-top overlay showing LLM tokens in/out (for OBS capture).",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        tu_desc.pack(anchor="w", padx=20, pady=(0, 10))
+
+        tu_btn = ctk.CTkButton(tu_frame, text="Open Token Usage Overlay", command=self.open_token_usage_overlay)
+        tu_btn.pack(anchor="w", padx=20, pady=(0, 15))
+
         # --- Text Scroller ---
         ts_frame = ctk.CTkFrame(self.extras_tab)
         ts_frame.pack(fill="x", padx=20, pady=10)
@@ -3052,6 +3070,18 @@ class ControlPanel(ctk.CTk):
             overlay.mainloop()
         except Exception as e:
             print(f"Failed to open now playing overlay: {e}")
+
+    def open_token_usage_overlay(self):
+        """Launch the token usage overlay in a separate window"""
+        try:
+            from extras.token_usage import TokenUsageOverlay
+
+            overlay = TokenUsageOverlay()
+            overlay.bind("<ButtonPress-1>", overlay.start_drag)
+            overlay.bind("<B1-Motion>", overlay.do_drag)
+            overlay.mainloop()
+        except Exception as e:
+            print(f"Failed to open token usage overlay: {e}")
 
     def open_text_scroller(self):
         """Launch the text scroller in a separate window"""

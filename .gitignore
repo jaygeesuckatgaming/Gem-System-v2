@@ -60,6 +60,7 @@ Neurosync/NeuroSync_Player/
 background_state.json
 now_playing_state.txt
 current_pose.txt
+token_usage_state.json
 
 # Browser-use session dumps (regenerated each task)
 session-*.md
