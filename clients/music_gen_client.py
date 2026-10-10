@@ -11,6 +11,7 @@ callback so main.py can record it to memory.
 import os
 import json
 import uuid
+import random
 import threading
 import requests
 import websocket
@@ -73,7 +74,19 @@ class MusicGenClient:
             # 2. Load and edit the workflow
             with open(self.workflow_file, "r", encoding="utf-8") as f:
                 workflow = json.load(f)
-            workflow[self.text_node_id]["inputs"]["style"] = prompt
+
+            # Inject the style prompt into every node that has a "style" input.
+            # In the YuE2 workflow the prompt drives both the ABC node (musical
+            # structure) and the music node (audio render), so all must match.
+            for node_id, node in workflow.items():
+                if isinstance(node, dict) and "inputs" in node:
+                    if "style" in node["inputs"]:
+                        node["inputs"]["style"] = prompt
+                    # Randomize every seed so each generation actually differs.
+                    # The workflow otherwise hardcodes a fixed seed, making all
+                    # songs sound nearly identical regardless of the prompt.
+                    if "seed" in node["inputs"]:
+                        node["inputs"]["seed"] = random.randint(0, 2**31 - 1)
 
             # 3. Queue the prompt
             payload = {"prompt": workflow, "client_id": client_id}
