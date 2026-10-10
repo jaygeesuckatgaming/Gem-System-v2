@@ -36,6 +36,11 @@ TTS_ALPHA = 0.3
 TTS_BETA = 0.7
 TTS_REFERENCE_VOICE = ""  # Path to a reference voice .wav file
 TTS_COPY_TO = ""  # Network share to copy generated audio to (empty = disabled)
+# True = SMB file copy (file-poll delivery). False = HTTP push to the watcher
+# over LAN (direct). Mutually exclusive to avoid double-play.
+TTS_COPY_ENABLED = True
+NEUROSYNC_AUDIO_PUSH_URL = 'http://192.168.137.129:13310/audio'
+NEUROSYNC_AUDIO_LISTEN_PORT = 13310
 
 # Pocket TTS
 POCKET_TTS_URL = "http://127.0.0.1:13301/tts"
