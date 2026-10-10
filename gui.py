@@ -53,12 +53,14 @@ class ControlPanel(ctk.CTk):
         self.tts_tab = self.tabview.add("TTS")
         self.audio_tab = self.tabview.add("Audio")
         self.music_tab = self.tabview.add("Music Requests")
+        self.music_gen_tab = self.tabview.add("Music Gen")
         self.neurosync_tab = self.tabview.add("Neurosync")
         self.osc_tab = self.tabview.add("OSC")
         self.opencode_tab = self.tabview.add("OpenCode")
         self.browser_tab = self.tabview.add("Browser Use")
         self.vision_tab = self.tabview.add("Vision")
         self.ssn_tab = self.tabview.add("Social Stream Ninja")
+        self.twitch_tab = self.tabview.add("Twitch")
         self.extras_tab = self.tabview.add("Extras")
         self.idle_tab = self.tabview.add("Idle Actions")
         self.laya_tab = self.tabview.add("Laya")
@@ -71,12 +73,14 @@ class ControlPanel(ctk.CTk):
         self.build_tts_tab()
         self.build_audio_tab()
         self.build_music_tab()
+        self.build_music_gen_tab()
         self.build_neurosync_tab()
         self.build_osc_tab()
         self.build_opencode_tab()
         self.build_browser_tab()
         self.build_vision_tab()
         self.build_ssn_tab()
+        self.build_twitch_tab()
         self.build_extras_tab()
         self.build_idle_tab()
         self.build_laya_tab()
@@ -1472,6 +1476,72 @@ class ControlPanel(ctk.CTk):
         except Exception as e:
             print(f"Failed to stop background song: {e}")
     
+    # ==================== MUSIC GEN TAB ====================
+    def build_music_gen_tab(self):
+        """Build the Music Gen (ComfyUI + YuE2) tab"""
+        title = ctk.CTkLabel(self.music_gen_tab, text="Music Generation", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+
+        # Enable toggle
+        self.music_gen_enabled_var = ctk.BooleanVar(value=False)
+        enable_check = ctk.CTkCheckBox(self.music_gen_tab, text="Enable Music Generation", variable=self.music_gen_enabled_var)
+        enable_check.pack(anchor="w", padx=20, pady=10)
+
+        # ComfyUI URL
+        url_label = ctk.CTkLabel(self.music_gen_tab, text="ComfyUI URL:", font=ctk.CTkFont(size=14))
+        url_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.music_gen_url_entry = ctk.CTkEntry(self.music_gen_tab)
+        self.music_gen_url_entry.pack(fill="x", padx=20, pady=10)
+
+        # Workflow file
+        workflow_label = ctk.CTkLabel(self.music_gen_tab, text="Workflow File:", font=ctk.CTkFont(size=14))
+        workflow_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.music_gen_workflow_entry = ctk.CTkEntry(self.music_gen_tab)
+        self.music_gen_workflow_entry.pack(fill="x", padx=20, pady=10)
+
+        # Text node ID
+        node_label = ctk.CTkLabel(self.music_gen_tab, text="Text Node ID:", font=ctk.CTkFont(size=14))
+        node_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.music_gen_node_entry = ctk.CTkEntry(self.music_gen_tab)
+        self.music_gen_node_entry.pack(fill="x", padx=20, pady=10)
+
+        # Save button
+        save_btn = ctk.CTkButton(self.music_gen_tab, text="Save Music Gen Settings", command=self.save_music_gen_settings)
+        save_btn.pack(pady=20)
+
+    def load_music_gen_settings(self):
+        """Load Music Gen settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                mg = data.get('music_gen', {})
+
+                self.music_gen_enabled_var.set(mg.get('enabled', False))
+                self.music_gen_url_entry.delete(0, "end")
+                self.music_gen_url_entry.insert(0, mg.get('comfyui_url', ''))
+                self.music_gen_workflow_entry.delete(0, "end")
+                self.music_gen_workflow_entry.insert(0, mg.get('workflow_file', ''))
+                self.music_gen_node_entry.delete(0, "end")
+                self.music_gen_node_entry.insert(0, mg.get('text_node_id', '22'))
+        except Exception as e:
+            print(f"Failed to load Music Gen settings: {e}")
+
+    def save_music_gen_settings(self):
+        """Save Music Gen settings to server"""
+        try:
+            payload = {
+                'music_gen_enabled': self.music_gen_enabled_var.get(),
+                'music_gen_comfyui_url': self.music_gen_url_entry.get().strip(),
+                'music_gen_workflow_file': self.music_gen_workflow_entry.get().strip(),
+                'music_gen_text_node_id': self.music_gen_node_entry.get().strip(),
+            }
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("Music Gen settings saved")
+        except Exception as e:
+            print(f"Failed to save Music Gen settings: {e}")
+    
     # ==================== NEUROSYNC TAB ====================
     def build_neurosync_tab(self):
         """Build the Neurosync tab with blendshape and OSC emote controls"""
@@ -2611,7 +2681,9 @@ class ControlPanel(ctk.CTk):
         self.load_cognee_settings()
         self.load_tts_settings()
         self.load_audio_settings()
+        self.load_music_gen_settings()
         self.load_ssn_settings()
+        self.load_twitch_settings()
         self.load_neurosync_settings()
         self.load_opencode_settings()
         self.load_browser_settings()
@@ -2787,6 +2859,131 @@ class ControlPanel(ctk.CTk):
                 print("✓ SSN settings saved")
         except Exception as e:
             print(f"Failed to save SSN settings: {e}")
+    
+    # ==================== TWITCH TAB ====================
+    def build_twitch_tab(self):
+        """Build the Twitch tab"""
+        title = ctk.CTkLabel(self.twitch_tab, text="Twitch", font=ctk.CTkFont(size=20, weight="bold"))
+        title.pack(pady=20)
+
+        self.twitch_status = ctk.CTkLabel(self.twitch_tab, text="Status: Checking...", font=ctk.CTkFont(size=16))
+        self.twitch_status.pack(anchor="w", padx=20, pady=5)
+
+        # Enable toggle
+        self.twitch_enabled_var = ctk.BooleanVar(value=False)
+        enable_check = ctk.CTkCheckBox(self.twitch_tab, text="Enable Twitch EventSub", variable=self.twitch_enabled_var)
+        enable_check.pack(anchor="w", padx=20, pady=10)
+
+        # Client ID
+        client_id_label = ctk.CTkLabel(self.twitch_tab, text="Client ID:", font=ctk.CTkFont(size=14))
+        client_id_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_client_id_entry = ctk.CTkEntry(self.twitch_tab)
+        self.twitch_client_id_entry.pack(fill="x", padx=20, pady=10)
+
+        # Client Secret
+        secret_label = ctk.CTkLabel(self.twitch_tab, text="Client Secret:", font=ctk.CTkFont(size=14))
+        secret_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_client_secret_entry = ctk.CTkEntry(self.twitch_tab, show="*")
+        self.twitch_client_secret_entry.pack(fill="x", padx=20, pady=10)
+
+        # OAuth token
+        oauth_label = ctk.CTkLabel(self.twitch_tab, text="OAuth Token:", font=ctk.CTkFont(size=14))
+        oauth_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_oauth_entry = ctk.CTkEntry(self.twitch_tab, show="*")
+        self.twitch_oauth_entry.pack(fill="x", padx=20, pady=10)
+
+        # Refresh token
+        refresh_label = ctk.CTkLabel(self.twitch_tab, text="Refresh Token:", font=ctk.CTkFont(size=14))
+        refresh_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_refresh_entry = ctk.CTkEntry(self.twitch_tab, show="*")
+        self.twitch_refresh_entry.pack(fill="x", padx=20, pady=10)
+
+        # Channel
+        channel_label = ctk.CTkLabel(self.twitch_tab, text="Channel:", font=ctk.CTkFont(size=14))
+        channel_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_channel_entry = ctk.CTkEntry(self.twitch_tab)
+        self.twitch_channel_entry.pack(fill="x", padx=20, pady=10)
+
+        # Sub animation
+        sub_anim_label = ctk.CTkLabel(self.twitch_tab, text="Sub Animation (OSC value):", font=ctk.CTkFont(size=14))
+        sub_anim_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_sub_anim_entry = ctk.CTkEntry(self.twitch_tab)
+        self.twitch_sub_anim_entry.pack(fill="x", padx=20, pady=10)
+
+        # Sub animation duck duration
+        duck_label = ctk.CTkLabel(self.twitch_tab, text="Sub Animation Duck Duration (seconds):", font=ctk.CTkFont(size=14))
+        duck_label.pack(anchor="w", padx=20, pady=(10, 0))
+        self.twitch_sub_duck_entry = ctk.CTkEntry(self.twitch_tab)
+        self.twitch_sub_duck_entry.pack(fill="x", padx=20, pady=10)
+
+        save_btn = ctk.CTkButton(self.twitch_tab, text="Save Twitch Settings", command=self.save_twitch_settings)
+        save_btn.pack(pady=20)
+
+        # Test button (triggers the sub animation with ducking)
+        test_btn = ctk.CTkButton(self.twitch_tab, text="Test Sub Animation (with duck)", command=self.test_twitch_sub_animation)
+        test_btn.pack(pady=(0, 20))
+
+    def load_twitch_settings(self):
+        """Load Twitch settings from server"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/status", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                tw = data.get('twitch', {})
+
+                self.twitch_enabled_var.set(tw.get('enabled', False))
+                self.twitch_client_id_entry.delete(0, "end")
+                self.twitch_client_id_entry.insert(0, tw.get('client_id', ''))
+                self.twitch_client_secret_entry.delete(0, "end")
+                self.twitch_client_secret_entry.insert(0, tw.get('client_secret', ''))
+                self.twitch_oauth_entry.delete(0, "end")
+                self.twitch_oauth_entry.insert(0, tw.get('oauth_token', ''))
+                self.twitch_refresh_entry.delete(0, "end")
+                self.twitch_refresh_entry.insert(0, tw.get('refresh_token', ''))
+                self.twitch_channel_entry.delete(0, "end")
+                self.twitch_channel_entry.insert(0, tw.get('channel', ''))
+                self.twitch_sub_anim_entry.delete(0, "end")
+                self.twitch_sub_anim_entry.insert(0, tw.get('sub_animation', ''))
+                self.twitch_sub_duck_entry.delete(0, "end")
+                self.twitch_sub_duck_entry.insert(0, str(tw.get('sub_animation_duck_s', 5.0)))
+
+                self.twitch_status.configure(
+                    text=f"Status: {'Configured' if tw.get('enabled') else 'Disabled'}"
+                )
+        except Exception as e:
+            print(f"Failed to load Twitch settings: {e}")
+
+    def save_twitch_settings(self):
+        """Save Twitch settings to server"""
+        try:
+            payload = {
+                'twitch_enabled': self.twitch_enabled_var.get(),
+                'twitch_client_id': self.twitch_client_id_entry.get().strip(),
+                'twitch_client_secret': self.twitch_client_secret_entry.get().strip(),
+                'twitch_oauth_token': self.twitch_oauth_entry.get().strip(),
+                'twitch_refresh_token': self.twitch_refresh_entry.get().strip(),
+                'twitch_channel': self.twitch_channel_entry.get().strip(),
+                'twitch_sub_animation': self.twitch_sub_anim_entry.get().strip(),
+                'twitch_sub_animation_duck_s': float(self.twitch_sub_duck_entry.get().strip() or 5.0),
+            }
+
+            response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Twitch settings saved")
+        except Exception as e:
+            print(f"Failed to save Twitch settings: {e}")
+
+    def test_twitch_sub_animation(self):
+        """Trigger the sub animation with ducking for testing."""
+        try:
+            payload = {'animation': self.twitch_sub_anim_entry.get().strip()}
+            response = httpx.post(f"{SERVER_URL}/api/osc/test_animation", json=payload, timeout=5)
+            if response.status_code == 200:
+                print("✓ Sub animation triggered")
+            else:
+                print(f"Failed to trigger sub animation: {response.text}")
+        except Exception as e:
+            print(f"Failed to trigger sub animation: {e}")
     
     # ==================== TTS SETTINGS ====================
     def start_styletts2(self):

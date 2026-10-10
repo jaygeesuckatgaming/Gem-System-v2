@@ -9,8 +9,16 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Social Stream Ninja
 SSN_API_URL = "https://io.socialstream.ninja"
-SSN_SESSION_ID = ""  # YOUR_SESSION_ID_HERE
+SSN_SESSION_ID = 'YOUR_SESSION_ID'
 SSN_TARGETS = ["discord", "twitch", "youtube"]
+
+# Twitch (direct EventSub connection for channel events)
+TWITCH_ENABLED = False
+TWITCH_CLIENT_ID = ''          # from dev.twitch.tv console
+TWITCH_CLIENT_SECRET = ''      # app secret (enables EventSub)
+TWITCH_OAUTH_TOKEN = ''        # broadcaster user access token
+TWITCH_REFRESH_TOKEN = ''      # broadcaster refresh token
+TWITCH_CHANNEL = ''            # channel name to watch
 
 # Cognee Memory
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
@@ -136,6 +144,12 @@ IDLE_MONOLOGUE_PROMPT = (
 
 # Twitch Music Check (verify songs against Twitch DJ Program)
 TWITCH_MUSIC_CHECK_ENABLED = True
+
+# Music Generation (ComfyUI + YuE2 workflow)
+MUSIC_GEN_ENABLED = True
+MUSIC_GEN_COMFYUI_URL = '127.0.0.1:8188'
+MUSIC_GEN_WORKFLOW_FILE = 'clients/comfyui_yue/yue2_full.json'
+MUSIC_GEN_TEXT_NODE_ID = '22'
 
 # Laya Fast-Lane Pre-Filter (classifies chat + sends OSC body cues before the LLM)
 LAYA_ENABLED = True

@@ -17,10 +17,12 @@ from quart_cors import cors
 
 import config
 from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient, WeatherClient
+from clients.twitch_client import TwitchClient
 from clients.audio_player import AudioPlayer
 from clients.opencode_client import format_opencode_response
 from clients.idle_manager import IdleManager
 from clients.browser_client import BrowserClient
+from clients.music_gen_client import MusicGenClient
 
 app = Quart(__name__)
 app = cors(app, allow_origin="*")
@@ -43,11 +45,29 @@ music = MusicClient(device_name=config.AUDIO_OUTPUT_DEVICE or None)
 music.background_volume = getattr(config, 'BACKGROUND_VOLUME', 0.5)
 music.music_device_name = getattr(config, 'MUSIC_OUTPUT_DEVICE', '') or None
 
+# Music generation (ComfyUI + YuE2)
+_music_gen_workflow = getattr(config, 'MUSIC_GEN_WORKFLOW_FILE', 'clients/comfyui_yue/yue2_full.json')
+if not os.path.isabs(_music_gen_workflow):
+    # main.py lives at the project root, so one dirname is the project root.
+    _music_gen_workflow = os.path.join(os.path.dirname(os.path.abspath(__file__)), _music_gen_workflow)
+music_gen = MusicGenClient(
+    comfyui_url=getattr(config, 'MUSIC_GEN_COMFYUI_URL', '127.0.0.1:8188'),
+    workflow_file=_music_gen_workflow,
+    text_node_id=getattr(config, 'MUSIC_GEN_TEXT_NODE_ID', '22'),
+)
+
 # Wire the LLM into the Twitch music checker so it can parse song requests
 music.twitch_checker.llm_parse_function = llm.chat_sync
 opencode = OpenCodeClient(api_url=config.OPENCODE_API_URL, workspace=config.OPENCODE_WORKSPACE)
 vision = VisionClient(scan_url=config.VISION_SCAN_URL, get_image_url=config.VISION_GET_IMAGE_URL)
 weather = WeatherClient(latitude=config.WEATHER_LATITUDE, longitude=config.WEATHER_LONGITUDE)
+twitch = TwitchClient(
+    client_id=getattr(config, 'TWITCH_CLIENT_ID', ''),
+    client_secret=getattr(config, 'TWITCH_CLIENT_SECRET', ''),
+    oauth_token=getattr(config, 'TWITCH_OAUTH_TOKEN', ''),
+    refresh_token=getattr(config, 'TWITCH_REFRESH_TOKEN', ''),
+    channel=getattr(config, 'TWITCH_CHANNEL', ''),
+)
 browser = BrowserClient(
     provider=getattr(config, 'BROWSER_LLM_PROVIDER', 'ollama'),
     ollama_model=getattr(config, 'BROWSER_OLLAMA_MODEL', '') or config.OLLAMA_MODEL,
@@ -66,6 +86,12 @@ def _on_download_complete(query: str):
     asyncio.create_task(cognee.remember("Gem", f"Gem downloaded the song: {query}"))
 
 music.on_download_complete = _on_download_complete
+
+# Record generated music to memory so Gem remembers it
+def _on_music_gen_complete(prompt: str, filepath: str):
+    asyncio.create_task(cognee.remember("Gem", f"Gem generated a song: {prompt} (saved to {filepath})"))
+
+music_gen.on_complete = _on_music_gen_complete
 
 # Idle manager (autonomous behavior when chat goes quiet)
 idle = IdleManager(
@@ -121,6 +147,49 @@ async def send_response(response: str):
 
     if config.SEND_RESPONSES_TO_CHAT:
         await ssn.send_message(response, targets=config.SSN_TARGETS)
+
+
+def trigger_animation_with_duck(animation: str, duck_s: float = 5.0):
+    """Send an OSC animation and duck the music while its audio clip plays.
+    Used for animations whose audio is played by Unreal (not Python TTS)."""
+    if not animation:
+        return
+    _duck_music()
+    apply_action_tag(animation)
+
+    async def _unduck_after():
+        await asyncio.sleep(duck_s)
+        _unduck_music()
+    asyncio.create_task(_unduck_after())
+
+
+async def handle_twitch_event(event: dict):
+    """React to a Twitch channel event with an in-character thank-you."""
+    event_type = event.get('event_type', '')
+    user = event.get('user', 'someone')
+
+    # Build a natural thank-you line for each event type
+    lines = {
+        'subscription': f"{user} just subscribed! Thank you so much for the support!",
+        'resubscription': f"Thank you {user} for resubscribing! You're amazing!",
+        'gift_sub': f"Thank you {user} for gifting subs to the community!",
+        'follow': f"Thanks for the follow, {user}! Welcome in!",
+        'raid': f"Thanks for the raid, {user}! Everyone make some noise!",
+        'cheer': f"Thanks for the {event.get('bits', '')} bits, {user}!",
+    }
+    response = lines.get(event_type)
+    if not response:
+        return
+
+    print(f"[TWITCH] {event_type}: {response}")
+    await send_response(response)
+
+    # Trigger an avatar animation for subscriptions (e.g. chicken_dance)
+    if event_type in ('subscription', 'resubscription', 'gift_sub'):
+        sub_anim = getattr(config, 'TWITCH_SUB_ANIMATION', '')
+        if sub_anim:
+            duck_s = getattr(config, 'TWITCH_SUB_ANIMATION_DUCK_S', 5.0)
+            trigger_animation_with_duck(sub_anim, duck_s)
 
 
 def _estimate_speech_seconds(text: str) -> float:
@@ -369,6 +438,18 @@ def save_config():
             'BROWSER_VIEWPORT_HEIGHT': (config.BROWSER_VIEWPORT_HEIGHT, False),
             'BROWSER_WINDOW_X': (config.BROWSER_WINDOW_X, False),
             'BROWSER_WINDOW_Y': (config.BROWSER_WINDOW_Y, False),
+            'TWITCH_ENABLED': (config.TWITCH_ENABLED, False),
+            'TWITCH_CLIENT_ID': (config.TWITCH_CLIENT_ID, True),
+            'TWITCH_CLIENT_SECRET': (config.TWITCH_CLIENT_SECRET, True),
+            'TWITCH_OAUTH_TOKEN': (config.TWITCH_OAUTH_TOKEN, True),
+            'TWITCH_REFRESH_TOKEN': (config.TWITCH_REFRESH_TOKEN, True),
+            'TWITCH_CHANNEL': (config.TWITCH_CHANNEL, True),
+            'TWITCH_SUB_ANIMATION': (config.TWITCH_SUB_ANIMATION, True),
+            'TWITCH_SUB_ANIMATION_DUCK_S': (config.TWITCH_SUB_ANIMATION_DUCK_S, False),
+            'MUSIC_GEN_ENABLED': (config.MUSIC_GEN_ENABLED, False),
+            'MUSIC_GEN_COMFYUI_URL': (config.MUSIC_GEN_COMFYUI_URL, True),
+            'MUSIC_GEN_WORKFLOW_FILE': (config.MUSIC_GEN_WORKFLOW_FILE, True),
+            'MUSIC_GEN_TEXT_NODE_ID': (config.MUSIC_GEN_TEXT_NODE_ID, True),
             'GAME_AGENT_ENABLED': (config.GAME_AGENT_ENABLED, False),
             'GAME_AGENT_INTERVAL_S': (config.GAME_AGENT_INTERVAL_S, False),
             'GAME_AGENT_MOVE_ADDRESS': (config.GAME_AGENT_MOVE_ADDRESS, True),
@@ -638,6 +719,75 @@ def is_stop_playlist_command(text: str) -> bool:
     return any(phrase in text_lower for phrase in phrases)
 
 
+def extract_countdown_command(text: str):
+    """Extract a countdown request: 'count down from X to Y'.
+    Returns (start, end) if both numbers are present, else None.
+    """
+    import re
+    m = re.search(
+        r'count\s*(?:down|from)?\s*(?:from)?\s*(\d+)\s*(?:to|down\s*to|->|through)?\s*(\d+)?',
+        text.lower()
+    )
+    if not m:
+        return None
+    start = int(m.group(1))
+    end = int(m.group(2)) if m.group(2) is not None else 0
+    return start, end
+
+
+def extract_make_song_command(text: str):
+    """Extract a music-generation prompt from 'make a song in this style <X>'.
+    Returns the style prompt, or None if not a make-a-song command.
+    """
+    text_lower = text.lower().strip()
+
+    for word in config.WAKE_WORDS:
+        if text_lower.startswith(word.lower()):
+            text_lower = text_lower[len(word):].strip()
+            break
+
+    patterns = [
+        "make a song in this style ",
+        "make a song in the style ",
+        "make a song ",
+        "make music ",
+        "create a song ",
+        "compose a song ",
+    ]
+    for pattern in patterns:
+        if pattern in text_lower:
+            idx = text_lower.index(pattern) + len(pattern)
+            prompt = text_lower[idx:].strip()
+            if prompt:
+                return prompt
+    return None
+
+
+def _number_to_words(n: int) -> str:
+    """Convert an integer 0..999 to English words (StyleTTS2 aligns words,
+    not bare digits, so spelling numbers out avoids 500 errors)."""
+    ones = ["zero", "one", "two", "three", "four", "five", "six", "seven",
+            "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
+            "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty",
+            "seventy", "eighty", "ninety"]
+
+    if n < 0:
+        return "minus " + _number_to_words(-n)
+    if n < 20:
+        return ones[n]
+    if n < 100:
+        t, o = divmod(n, 10)
+        return tens[t] + ("-" + ones[o] if o else "")
+    if n < 1000:
+        h, r = divmod(n, 100)
+        word = ones[h] + " hundred"
+        if r:
+            word += " and " + _number_to_words(r)
+        return word
+    return str(n)  # beyond 999, fall back to digits
+
+
 def translate_emotes(text: str) -> str:
     """Translate chat emotes into their meanings so the LLM understands them.
     Returns the original text with emote meanings appended in brackets.
@@ -847,6 +997,40 @@ async def handle_incoming_message(data: dict):
     if not wake_word:
         return  # No wake word, ignore
     
+    # Check for an explicit URL (intercept before LLM so browsing is reliable).
+    # "go to <url> and ..." routes straight to the browser agent regardless of
+    # whether the chat LLM decides to emit a browse tool call.
+    url_match = re.search(r'https?://\S+', message)
+    if url_match and getattr(config, 'BROWSER_ENABLED', False) and browser.enabled:
+        url = url_match.group(0).rstrip('.,;!?)')
+        print(f"🌐 URL detected: '{url}'")
+        await cognee.remember(speaker, message)
+        add_to_chat_history(speaker, message)
+
+        blocked = find_blocked_term(message)
+        if blocked:
+            response = f"I can't go to that, it's blocked ({blocked})."
+        else:
+            task = f"The user asked: '{message}'. Navigate to {url} and complete the request."
+            try:
+                browser_result = await browser.run_task(task)
+                summary = await llm.chat(
+                    f"You browsed the web and got this result: '{browser_result}'. "
+                    f"Summarize it in character as Gem, in 1-3 sentences.",
+                    system_prompt=config.SYSTEM_PROMPT,
+                )
+                response = summary if (summary and not summary.startswith("Error")) else "Got it!"
+            except Exception as e:
+                print(f"Browser task failed: {e}")
+                response = "Sorry, I ran into a problem browsing that."
+
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        add_to_chat_history("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        await send_response(response)
+        return
+    
     # Check for "sing the song" command (karaoke library, before download)
     sing_name = extract_sing_command(message)
     if sing_name:
@@ -935,6 +1119,60 @@ async def handle_incoming_message(data: dict):
             await ssn.send_message("🛑 Stopped the music.", targets=config.SSN_TARGETS)
         else:
             await ssn.send_message("Nothing's playing right now.", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for countdown command (intercept before LLM)
+    countdown = extract_countdown_command(message)
+    if countdown:
+        start, end = countdown
+        # Cap the count so a huge range doesn't run for many minutes of TTS.
+        max_count = getattr(config, 'COUNTDOWN_MAX', 100)
+        total = abs(start - end) + 1
+        if total > max_count:
+            await ssn.send_message(
+                f"That countdown is too long ({total} numbers). Keep it under {max_count}.",
+                targets=config.SSN_TARGETS
+            )
+            return
+        print(f"⏱️ Countdown command detected: {start} -> {end}")
+        await cognee.remember(speaker, message)
+
+        # Generate the exact sequence in code (LLMs can't count reliably).
+        step = -1 if start > end else 1
+        nums = [n for n in range(start, end + step, step)]
+
+        # Speak numbers as English words (StyleTTS2 aligns words, not bare
+        # digits, so spelling them out avoids 500 errors). Chunk + delay so
+        # each chunk is played before the next overwrites the TTS file.
+        chunk_size = getattr(config, 'COUNTDOWN_TTS_CHUNK', 10)
+        chunk_delay_s = getattr(config, 'COUNTDOWN_CHUNK_DELAY_S', 3.0)
+        for i in range(0, len(nums), chunk_size):
+            chunk = ", ".join(_number_to_words(n) for n in nums[i:i + chunk_size])
+            ok = await tts.speak(chunk)
+            if not ok:
+                print(f"[COUNTDOWN] TTS failed on chunk starting at {nums[i]}")
+            await asyncio.sleep(chunk_delay_s)
+
+        await ssn.send_message(f"⏱️ Counted from {start} to {end}!", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for make-a-song command (intercept before LLM)
+    song_prompt = extract_make_song_command(message)
+    if song_prompt and getattr(config, 'MUSIC_GEN_ENABLED', False):
+        print(f"🎼 Music generation command detected: '{song_prompt}'")
+        await cognee.remember(speaker, message)
+
+        started = music_gen.generate(song_prompt)
+        if started:
+            await ssn.send_message(
+                f"🎼 On it! Composing a song in that style. This might take a minute...",
+                targets=config.SSN_TARGETS
+            )
+        else:
+            await ssn.send_message(
+                "I'm already working on a song right now, give me a sec!",
+                targets=config.SSN_TARGETS
+            )
         return
     
     # Check for resume background music command (intercept before LLM)
@@ -1330,6 +1568,22 @@ async def api_status():
             'window_x': config.BROWSER_WINDOW_X,
             'window_y': config.BROWSER_WINDOW_Y
         },
+        'twitch': {
+            'enabled': config.TWITCH_ENABLED,
+            'client_id': config.TWITCH_CLIENT_ID,
+            'client_secret': config.TWITCH_CLIENT_SECRET,
+            'oauth_token': config.TWITCH_OAUTH_TOKEN,
+            'refresh_token': config.TWITCH_REFRESH_TOKEN,
+            'channel': config.TWITCH_CHANNEL,
+            'sub_animation': config.TWITCH_SUB_ANIMATION,
+            'sub_animation_duck_s': config.TWITCH_SUB_ANIMATION_DUCK_S
+        },
+        'music_gen': {
+            'enabled': config.MUSIC_GEN_ENABLED,
+            'comfyui_url': config.MUSIC_GEN_COMFYUI_URL,
+            'workflow_file': config.MUSIC_GEN_WORKFLOW_FILE,
+            'text_node_id': config.MUSIC_GEN_TEXT_NODE_ID
+        },
         'game_agent': {
             'enabled': config.GAME_AGENT_ENABLED,
             'interval_s': config.GAME_AGENT_INTERVAL_S,
@@ -1646,6 +1900,41 @@ async def api_update_settings():
     if 'browser_window_y' in data:
         config.BROWSER_WINDOW_Y = data['browser_window_y']
         browser.window_y = data['browser_window_y']
+    if 'twitch_enabled' in data:
+        config.TWITCH_ENABLED = data['twitch_enabled']
+    if 'twitch_client_id' in data:
+        config.TWITCH_CLIENT_ID = data['twitch_client_id']
+        twitch.client_id = data['twitch_client_id']
+    if 'twitch_client_secret' in data:
+        config.TWITCH_CLIENT_SECRET = data['twitch_client_secret']
+        twitch.client_secret = data['twitch_client_secret']
+    if 'twitch_oauth_token' in data:
+        config.TWITCH_OAUTH_TOKEN = data['twitch_oauth_token']
+        twitch.oauth_token = data['twitch_oauth_token']
+    if 'twitch_refresh_token' in data:
+        config.TWITCH_REFRESH_TOKEN = data['twitch_refresh_token']
+        twitch.refresh_token = data['twitch_refresh_token']
+    if 'twitch_channel' in data:
+        config.TWITCH_CHANNEL = data['twitch_channel']
+        twitch.channel = data['twitch_channel']
+    if 'twitch_sub_animation' in data:
+        config.TWITCH_SUB_ANIMATION = data['twitch_sub_animation']
+    if 'twitch_sub_animation_duck_s' in data:
+        config.TWITCH_SUB_ANIMATION_DUCK_S = data['twitch_sub_animation_duck_s']
+    if 'music_gen_enabled' in data:
+        config.MUSIC_GEN_ENABLED = data['music_gen_enabled']
+    if 'music_gen_comfyui_url' in data:
+        config.MUSIC_GEN_COMFYUI_URL = data['music_gen_comfyui_url']
+        music_gen.comfyui_url = data['music_gen_comfyui_url']
+    if 'music_gen_workflow_file' in data:
+        config.MUSIC_GEN_WORKFLOW_FILE = data['music_gen_workflow_file']
+        wf = data['music_gen_workflow_file']
+        if not os.path.isabs(wf):
+            wf = os.path.join(os.path.dirname(os.path.abspath(__file__)), wf)
+        music_gen.workflow_file = wf
+    if 'music_gen_text_node_id' in data:
+        config.MUSIC_GEN_TEXT_NODE_ID = data['music_gen_text_node_id']
+        music_gen.text_node_id = data['music_gen_text_node_id']
     if 'game_agent_enabled' in data:
         config.GAME_AGENT_ENABLED = data['game_agent_enabled']
     if 'game_agent_interval_s' in data:
@@ -1728,6 +2017,18 @@ async def api_osc_emote():
     
     success = send_osc_emote(emote_name)
     return jsonify({'status': 'ok' if success else 'error'})
+
+
+@app.route('/api/osc/test_animation', methods=['POST'])
+async def api_osc_test_animation():
+    """Trigger a sub-style animation with ducking (for testing)."""
+    data = await request.get_json()
+    animation = data.get('animation', '') or getattr(config, 'TWITCH_SUB_ANIMATION', '')
+    duck_s = float(data.get('duck_s', 0) or getattr(config, 'TWITCH_SUB_ANIMATION_DUCK_S', 5.0))
+    if not animation:
+        return jsonify({'status': 'error', 'error': 'No animation specified'}), 400
+    trigger_animation_with_duck(animation, duck_s)
+    return jsonify({'status': 'ok', 'animation': animation, 'duck_s': duck_s})
 
 
 @app.route('/api/osc/test', methods=['POST'])
@@ -2209,6 +2510,12 @@ async def startup():
     if getattr(config, 'BROWSER_ENABLED', False):
         browser.check_connection()
     
+    # Check and start Twitch EventSub (if enabled)
+    if getattr(config, 'TWITCH_ENABLED', False):
+        twitch.on_event = handle_twitch_event
+        if twitch.check_connection():
+            twitch.start()
+    
     # Start background tasks
     await start_background_tasks()
 
@@ -2218,6 +2525,10 @@ async def shutdown():
     """Save state on server shutdown"""
     print("Shutting down Gem-System v2...")
     music.save_background_state()
+    try:
+        await twitch.stop()
+    except Exception:
+        pass
     try:
         await browser.close()
     except Exception:
