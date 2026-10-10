@@ -52,6 +52,7 @@ yt-dlp.exe
 # Music generation output (large audio binaries)
 music/generated/
 clients/comfyui_yue/*.flac
+*.flac
 
 # Temp audio from voice listener
 temp_audio_chunk.wav
