@@ -2501,6 +2501,14 @@ async def chat():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/api/voice_activity', methods=['POST'])
+async def voice_activity():
+    """Called by listen.py the moment microphone speech is detected, so the
+    idle monologue timer resets and doesn't fire while someone is talking."""
+    idle.update_activity()
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/process', methods=['POST'])
 async def process():
     """Process transcribed audio from listen.py (microphone input).

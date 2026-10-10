@@ -30,6 +30,7 @@ FRAME_DURATION_MS = 20
 FRAMES_PER_BUFFER = int(SAMPLE_RATE * FRAME_DURATION_MS / 1000)
 SILENCE_THRESHOLD_S = 2.0
 PRE_BUFFER_S = 0.5
+MAX_RECORD_S = 120.0  # Max recording duration; force-process even if no silence
 MIN_DB = -40.0   # Energy gate threshold (dB); audio below this is treated as silence
 WAV_FILE_NAME = "temp_audio_chunk.wav"
 
@@ -51,7 +52,7 @@ def load_settings_from_ini():
     sys.path.insert(0, project_root)
     import config as cfg
 
-    global VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_S, PRE_BUFFER_S, MIN_DB
+    global VAD_AGGRESSIVENESS, SILENCE_THRESHOLD_S, PRE_BUFFER_S, MAX_RECORD_S, MIN_DB
 
     settings = {}
     
@@ -60,6 +61,7 @@ def load_settings_from_ini():
         host = getattr(cfg, 'SERVER_HOST', '127.0.0.1')
         port = getattr(cfg, 'SERVER_PORT', 5000)
         settings['mcp_url'] = f"http://{host}:{port}/process"
+        settings['activity_url'] = f"http://{host}:{port}/api/voice_activity"
         print(f"AUDIO INFO: MCP URL set to -> {settings['mcp_url']}")
 
         # Load STT tuning values from config.py
@@ -67,6 +69,7 @@ def load_settings_from_ini():
         VAD_AGGRESSIVENESS = int(getattr(cfg, 'STT_VAD_AGGRESSIVENESS', 1))
         SILENCE_THRESHOLD_S = float(getattr(cfg, 'STT_SILENCE_THRESHOLD_S', 2.0))
         PRE_BUFFER_S = float(getattr(cfg, 'STT_PRE_BUFFER_S', 0.5))
+        MAX_RECORD_S = float(getattr(cfg, 'STT_MAX_RECORD_S', 120.0))
         MIN_DB = float(getattr(cfg, 'STT_MIN_DB', -40.0))
 
         # Get the audio input device string from config.py
@@ -112,6 +115,14 @@ def send_to_mcp(transcribed_text: str, mcp_url: str):
     except requests.exceptions.RequestException as e:
         print(f"MCP CONNECTION ERROR: Could not connect. Is MCP running? Details: {e}")
 
+
+def notify_voice_activity(activity_url: str):
+    """Ping the MCP so the idle monologue timer resets (speech detected)."""
+    try:
+        requests.post(activity_url, json={}, timeout=2)
+    except requests.exceptions.RequestException:
+        pass  # best-effort; ignore if MCP is briefly unreachable
+
 def audio_callback(indata, frames, time, status):
     if status: print(f"Audio callback status: {status}", file=sys.stderr)
     audio_queue.put(bytes(indata))
@@ -122,6 +133,7 @@ def main():
     # Load all settings from the central INI file
     settings = load_settings_from_ini()
     mcp_url = settings['mcp_url']
+    activity_url = settings['activity_url']
     selected_device = settings['device_id']
 
     print("\nInitializing services...")
@@ -135,6 +147,7 @@ def main():
         sys.exit(f"An error occurred during initialization: {e}")
 
     max_silent_frames = int(SILENCE_THRESHOLD_S * SAMPLE_RATE / FRAMES_PER_BUFFER)
+    max_record_frames = int(MAX_RECORD_S * SAMPLE_RATE / FRAMES_PER_BUFFER)
 
     # Smoothing state so the gate matches the VU meter (which uses 0.85 smoothing).
     _smoothed_db = -100.0
@@ -159,45 +172,56 @@ def main():
 
     try:
         with sd.RawInputStream(samplerate=SAMPLE_RATE, blocksize=FRAMES_PER_BUFFER, device=selected_device, dtype="int16", channels=1, callback=audio_callback):
+            def process_and_reset(reason: str):
+                """Transcribe the recorded frames and reset for the next utterance."""
+                global is_recording
+                print(f"{reason}, processing...")
+                all_frames = list(pre_buffer_frames) + recorded_frames
+                with wave.open(WAV_FILE_NAME, 'wb') as wf:
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(SAMPLE_RATE); wf.writeframes(b''.join(all_frames))
+
+                try:
+                    sr, audio_data = read_wav(WAV_FILE_NAME)
+                    audio_data = audio_data.astype(np.float32) / 32768.0
+                    segments, _info = model.transcribe(audio_data, language="en", beam_size=5)
+                    transcribed_text = " ".join(seg.text.strip() for seg in segments).strip()
+                except Exception as e:
+                    print(f"Whisper transcription error: {e}")
+                    transcribed_text = ""
+
+                if transcribed_text:
+                    print(f"Transcribed: '{transcribed_text}'")
+                    send_to_mcp(transcribed_text, mcp_url)
+
+                # Reset for next utterance
+                is_recording = False
+                recorded_frames.clear()
+                pre_buffer_frames.clear()
+                silent_frames_count = 0
+                print(f"\n--- Audio Client Listening on '{device_name}' ---")
+
             while True:
                 frame = audio_queue.get()
                 is_speech = frame_is_speech(frame)
 
                 if is_recording:
                     recorded_frames.append(frame)
-                    if not is_speech and len(recorded_frames) > 10: # Check for silence after some speech
+                    # Force-process if someone talks non-stop for too long,
+                    # otherwise the recording never resets and grows unbounded.
+                    if len(recorded_frames) >= max_record_frames:
+                        process_and_reset("Max recording duration reached")
+                    elif not is_speech and len(recorded_frames) > 10: # Check for silence after some speech
                         silent_frames_count += 1
                         if silent_frames_count > max_silent_frames:
-                            print("Silence detected, processing...")
-                            all_frames = list(pre_buffer_frames) + recorded_frames
-                            with wave.open(WAV_FILE_NAME, 'wb') as wf:
-                                wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(SAMPLE_RATE); wf.writeframes(b''.join(all_frames))
-                            
-                            try:
-                                sr, audio_data = read_wav(WAV_FILE_NAME)
-                                audio_data = audio_data.astype(np.float32) / 32768.0
-                                segments, _info = model.transcribe(audio_data, language="en", beam_size=5)
-                                transcribed_text = " ".join(seg.text.strip() for seg in segments).strip()
-                            except Exception as e:
-                                print(f"Whisper transcription error: {e}")
-                                transcribed_text = ""
-                            
-                            if transcribed_text:
-                                print(f"Transcribed: '{transcribed_text}'")
-                                send_to_mcp(transcribed_text, mcp_url)
-
-                            # Reset for next utterance
-                            is_recording = False
-                            recorded_frames.clear()
-                            pre_buffer_frames.clear()
-                            silent_frames_count = 0
-                            print(f"\n--- Audio Client Listening on '{device_name}' ---")
+                            process_and_reset("Silence detected")
                     else:
                         silent_frames_count = 0 # Reset silence counter if speech is detected
                 else:
                     pre_buffer_frames.append(frame)
                     if is_speech:
                         print("Speech detected, recording...")
+                        # Reset the idle-monologue timer the moment someone talks.
+                        notify_voice_activity(activity_url)
                         is_recording = True
                         recorded_frames.extend(pre_buffer_frames)
     except KeyboardInterrupt:
