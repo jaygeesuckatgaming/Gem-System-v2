@@ -1558,11 +1558,8 @@ class ControlPanel(ctk.CTk):
         btn_row = ctk.CTkFrame(start_frame, fg_color="transparent")
         btn_row.pack(fill="x", padx=10, pady=(0, 10))
         
-        self.start_localapi_btn = ctk.CTkButton(btn_row, text="Start Local API", width=150, command=self.start_neurosync_localapi)
-        self.start_localapi_btn.pack(side="left", padx=5)
-        
-        self.start_watcher_btn = ctk.CTkButton(btn_row, text="Start Watcher To Face", width=180, command=self.start_neurosync_watcher)
-        self.start_watcher_btn.pack(side="left", padx=5)
+        self.start_neurosync_btn = ctk.CTkButton(btn_row, text="Start Neurosync", width=180, command=self.start_neurosync)
+        self.start_neurosync_btn.pack(side="left", padx=5)
 
         # Audio file path for watcher_to_face
         audio_path_label = ctk.CTkLabel(self.neurosync_tab, text="Watcher Audio File Path:", font=ctk.CTkFont(size=13))
@@ -1887,17 +1884,11 @@ class ControlPanel(ctk.CTk):
         if emote:
             self.send_test_emote(emote)
     
-    def start_neurosync_localapi(self):
-        """Launch the Neurosync Local API batch file"""
-        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_localapi.bat")
+    def start_neurosync(self):
+        """Launch the merged Neurosync batch file (Local API + Watcher To Face)"""
+        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_merged_watcher_to_face.bat")
         if self._launch_detached(bat_path):
-            print("✓ Started Neurosync Local API")
-    
-    def start_neurosync_watcher(self):
-        """Launch the Neurosync Watcher To Face batch file"""
-        bat_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_scripts", "start_neurosync_watcher_to_face.bat")
-        if self._launch_detached(bat_path):
-            print("✓ Started Watcher To Face")
+            print("✓ Started Neurosync")
     
     # ==================== OSC TAB ====================
     def build_osc_tab(self):
