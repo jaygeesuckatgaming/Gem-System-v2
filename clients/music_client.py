@@ -428,6 +428,30 @@ class MusicClient:
             print(f"✗ Failed to play generated song: {e}")
             return False
 
+    def find_generated_song(self, query: str) -> Optional[str]:
+        """Find a generated song by name/partial match in music/generated.
+        Returns the filename if found, otherwise None."""
+        generated_folder = os.path.join(MUSIC_DIR, "generated")
+        if not os.path.isdir(generated_folder):
+            return None
+        query_clean = query.lower().strip().replace("_", " ").replace("-", " ")
+        for filename in os.listdir(generated_folder):
+            if not filename.lower().endswith(".mp3"):
+                continue
+            name = filename.lower()[:-4].replace("_", " ").replace("-", " ")
+            if query_clean in name or name in query_clean:
+                return filename
+        return None
+
+    def play_generated_song(self, filename: str) -> bool:
+        """Play a generated song by filename from music/generated."""
+        filepath = os.path.join(MUSIC_DIR, "generated", filename)
+        if not os.path.exists(filepath):
+            return False
+        print(f"🎵 Playing generated song: {filename}")
+        self._enqueue_request(filepath)
+        return True
+
     def _write_state_file(self, song_name: Optional[str]):
         """Write the current song to now_playing_state.txt (or clear it)."""
         try:

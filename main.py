@@ -1133,6 +1133,14 @@ async def handle_incoming_message(data: dict):
         # Store the song request in memory
         await cognee.remember(speaker, message)
         
+        # First check if it's a generated song (by name) before treating it as
+        # a download request.
+        generated = music.find_generated_song(song_name)
+        if generated:
+            music.play_generated_song(generated)
+            await ssn.send_message(f"🎵 Playing my generated song '{generated}'!", targets=config.SSN_TARGETS)
+            return
+        
         # Check Twitch DJ Program restrictions
         if config.TWITCH_MUSIC_CHECK_ENABLED:
             result = music.verify_song(song_name)
