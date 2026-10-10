@@ -82,16 +82,43 @@ browser = BrowserClient(
 )
 
 # Record downloaded songs to memory so Gem remembers them
+_main_loop = None  # main asyncio loop, captured in startup()
+
+
+def _run_in_loop(coro):
+    """Schedule a coroutine onto the main loop from any thread (safely)."""
+    if _main_loop is None:
+        print("[WARN] Main loop not captured yet; dropping callback")
+        return
+    asyncio.run_coroutine_threadsafe(coro, _main_loop)
+
+
 def _on_download_complete(query: str):
-    asyncio.create_task(cognee.remember("Gem", f"Gem downloaded the song: {query}"))
+    _run_in_loop(cognee.remember("Gem", f"Gem downloaded the song: {query}"))
 
 music.on_download_complete = _on_download_complete
 
-# Record generated music to memory so Gem remembers it
+# Record generated music to memory and tell the user it's ready
 def _on_music_gen_complete(prompt: str, filepath: str):
-    asyncio.create_task(cognee.remember("Gem", f"Gem generated a song: {prompt} (saved to {filepath})"))
+    _run_in_loop(cognee.remember("Gem", f"Gem generated a song: {prompt} (saved to {filepath})"))
+    _run_in_loop(_announce_music_ready(prompt))
 
 music_gen.on_complete = _on_music_gen_complete
+
+async def _announce_music_ready(prompt: str):
+    """Tell the user (TTS + chat) that their generated song is ready."""
+    try:
+        response = await llm.chat(
+            f"You just finished generating a song for the user. The style prompt was: "
+            f"'{prompt}'. Tell the user in character, in 1-2 sentences, that their "
+            f"song is ready.",
+            system_prompt=config.SYSTEM_PROMPT,
+        )
+        if not response or response.startswith("Error"):
+            response = "Your song is ready!"
+        await send_response(response)
+    except Exception as e:
+        print(f"Failed to announce music ready: {e}")
 
 # Idle manager (autonomous behavior when chat goes quiet)
 idle = IdleManager(
@@ -763,6 +790,22 @@ def extract_make_song_command(text: str):
     return None
 
 
+def is_play_latest_command(text: str) -> bool:
+    """Check if the message asks to play the latest generated song."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "play the latest song you created",
+        "play the latest song you made",
+        "play your latest song",
+        "play the song you just created",
+        "play the song you just made",
+        "play the last song you created",
+        "play the last song you made",
+        "play my latest song",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
+
+
 def _number_to_words(n: int) -> str:
     """Convert an integer 0..999 to English words (StyleTTS2 aligns words,
     not bare digits, so spelling numbers out avoids 500 errors)."""
@@ -1065,6 +1108,18 @@ async def handle_incoming_message(data: dict):
         await cognee.remember(speaker, message)
         music.stop_playlist()
         await ssn.send_message("🛑 Stopped the playlist.", targets=config.SSN_TARGETS)
+        return
+    
+    # Check for "play the latest song you created" (intercept BEFORE the generic
+    # song command, which would otherwise mis-parse it as "the latest song...").
+    if is_play_latest_command(message):
+        print(f"🎼 Play-latest-generated command detected: '{message}'")
+        await cognee.remember(speaker, message)
+
+        if music.play_latest_generated():
+            await ssn.send_message("🎵 Here's the latest song I created!", targets=config.SSN_TARGETS)
+        else:
+            await ssn.send_message("I haven't created any songs yet.", targets=config.SSN_TARGETS)
         return
     
     # Check for song command (intercept before LLM)
@@ -2475,6 +2530,10 @@ async def start_background_tasks():
 async def startup():
     """Initialize connections on server start"""
     print("Starting Gem-System v2...")
+    
+    # Capture the main event loop so background threads can schedule coroutines.
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
     
     # Check LLM connection
     await llm.check_connection()

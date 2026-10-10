@@ -407,6 +407,27 @@ class MusicClient:
         except Exception as e:
             print(f"✗ Failed to play downloaded song: {e}")
 
+    def play_latest_generated(self) -> bool:
+        """Play the most recently generated song (music/generated folder)."""
+        generated_folder = os.path.join(MUSIC_DIR, "generated")
+        try:
+            if not os.path.isdir(generated_folder):
+                return False
+            files = sorted(
+                [f for f in os.listdir(generated_folder) if f.lower().endswith('.mp3')],
+                key=lambda f: os.path.getmtime(os.path.join(generated_folder, f)),
+                reverse=True
+            )
+            if not files:
+                return False
+            latest = os.path.join(generated_folder, files[0])
+            print(f"🎵 Playing generated song: {files[0]}")
+            self._enqueue_request(latest)
+            return True
+        except Exception as e:
+            print(f"✗ Failed to play generated song: {e}")
+            return False
+
     def _write_state_file(self, song_name: Optional[str]):
         """Write the current song to now_playing_state.txt (or clear it)."""
         try:

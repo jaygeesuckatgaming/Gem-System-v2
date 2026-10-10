@@ -10,8 +10,10 @@ callback so main.py can record it to memory.
 
 import os
 import json
+import re
 import uuid
 import random
+import subprocess
 import threading
 import requests
 import websocket
@@ -107,7 +109,7 @@ class MusicGenClient:
             print("[MUSICGEN] Generation complete")
 
             # 5. Download the audio output
-            filepath = self._download_output(prompt_id)
+            filepath = self._download_output(prompt_id, prompt)
 
             # 6. Notify via callback
             if filepath and self.on_complete:
@@ -120,8 +122,8 @@ class MusicGenClient:
         finally:
             self.current_generation = None
 
-    def _download_output(self, prompt_id: str):
-        """Find and download the generated audio file into output_folder."""
+    def _download_output(self, prompt_id: str, prompt: str = ""):
+        """Find and download the generated audio, convert to MP3, and save it."""
         try:
             history_res = requests.get(f"http://{self.comfyui_url}/history/{prompt_id}")
             history = history_res.json()[prompt_id]
@@ -138,11 +140,55 @@ class MusicGenClient:
                            f"&subfolder={subfolder}&type={file_type}")
                     audio_data = requests.get(url).content
 
-                    dest = os.path.join(self.output_folder, filename)
-                    with open(dest, "wb") as f:
+                    # Save the raw audio, then convert to MP3 so generated songs
+                    # match the rest of the music pipeline (which is all .mp3).
+                    raw_path = os.path.join(self.output_folder, filename)
+                    with open(raw_path, "wb") as f:
                         f.write(audio_data)
-                    print(f"[MUSICGEN] Saved: {dest}")
+
+                    dest = self._convert_to_mp3(raw_path, prompt)
                     return dest
         except Exception as e:
             print(f"[MUSICGEN] Failed to download output: {e}")
         return None
+
+    def _convert_to_mp3(self, raw_path: str, prompt: str) -> str:
+        """Ensure the generated audio is a prompt-named MP3. If it's already MP3
+        (the workflow now outputs MP3 directly), just rename it; otherwise convert
+        via ffmpeg."""
+        stem = os.path.splitext(os.path.basename(raw_path))[0]
+        if prompt:
+            safe = "".join(c for c in prompt if c.isalnum() or c in " -_").strip()
+            safe = re.sub(r"[_\s]+", "_", safe)[:60] or stem
+        else:
+            safe = stem
+
+        mp3_path = os.path.join(self.output_folder, f"{safe}.mp3")
+
+        # Already MP3 -> just rename, no re-encode.
+        if raw_path.lower().endswith(".mp3"):
+            if os.path.abspath(raw_path) != os.path.abspath(mp3_path):
+                try:
+                    os.rename(raw_path, mp3_path)
+                except Exception:
+                    import shutil
+                    shutil.move(raw_path, mp3_path)
+            print(f"[MUSICGEN] Saved MP3: {mp3_path}")
+            return mp3_path
+
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", raw_path, "-vn", "-codec:a", "libmp3lame",
+                 "-q:a", "2", mp3_path],
+                check=True, capture_output=True,
+            )
+            print(f"[MUSICGEN] Saved MP3: {mp3_path}")
+            # Remove the raw file now that the MP3 exists
+            try:
+                os.remove(raw_path)
+            except Exception:
+                pass
+            return mp3_path
+        except Exception as e:
+            print(f"[MUSICGEN] ffmpeg conversion failed: {e}")
+            return raw_path
