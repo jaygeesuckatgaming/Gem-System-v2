@@ -2,6 +2,18 @@
 
 # Gem-System-v2
 
+## Documentation
+
+The system documentation lives in `Docs/` (written for AI coding assistants and the
+maintainer — keep it updated when behavior changes):
+
+- [AGENTS.md](AGENTS.md) — start here: quick facts, gotchas, and pointers for AI assistants
+- [Docs/MESSAGE-PIPELINE.md](Docs/MESSAGE-PIPELINE.md) — what happens to a chat message, in what order
+- [Docs/COMMANDS.md](Docs/COMMANDS.md) — every chat trigger phrase and what it does
+- [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md) — processes, ports, conda envs, state files, startup order
+- [Docs/SUBSYSTEMS.md](Docs/SUBSYSTEMS.md) — how each subsystem works (LLM, TTS, music, memory, Laya, Neurosync, GUI, ...)
+- [FOLDER_TREE.md](FOLDER_TREE.md) — directory layout
+
 **Windows Installation:** (NOT COMPLETE IN ANYWAY.....)
 
 **Pre requirements**

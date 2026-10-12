@@ -205,6 +205,27 @@ VISION_TRIGGER_WORDS = ["see", "describe", "analyze", "scan", "what is in", "wha
 VISION_IMAGE_SOURCE = "cam"
 VISION_CAMERA_INDEX = 0
 VISION_NDI_SOURCE_NAME = ""
+VISION_FRAME_MAX_EDGE = 1280  # Longest edge of the frame served to the LLM/preview
+                              # (aspect preserved; bigger = more facial detail for Gem)
+VISION_WATCH_LABEL = "auto"  # What the vision source shows, used when greeting faces on stream.
+                             # 'auto' = Gem looks at the frame and mentions whose stream it is itself;
+                             # or a manual label like "Bob's stream" to pin it.
+
+# Face Recognition (OpenCV YuNet + SFace, watches the vision source)
+# Models: models/faces/face_detection_yunet_2023mar.onnx + face_recognition_sface_2021dec.onnx
+# (download from the official opencv_zoo repo). Enroll people via the GUI Vision tab or by
+# dropping a <name>.jpg photo into models/faces/photos/.
+VISION_FACE_DIR = "models/faces"
+VISION_FACE_RECOGNITION_ENABLED = True
+VISION_FACE_SCAN_INTERVAL_S = 5.0
+VISION_FACE_MATCH_THRESHOLD = 0.363   # SFace cosine similarity (0.363 = recommended identity threshold)
+VISION_FACE_GREET_ENABLED = True
+VISION_FACE_GREET_COOLDOWN_S = 900    # Per-person: don't re-greet within this many seconds
+VISION_FACE_ABSENCE_RESET_S = 120     # Person must be off-screen this long to count as a new appearance
+VISION_FACE_REPORT_UNKNOWN = True      # Mention when an unrecognized person appears
+# Face names to never greet/remember/report (enroll the persistent false positive once —
+# e.g. the channel avatar/logo or Gem's own face on the canvas — then list it here)
+VISION_FACE_IGNORE_NAMES = ["channel_avatar"]
 
 # Weather (Open-Meteo, no API key)
 WEATHER_LATITUDE = 12.9276    # Pattaya, Thailand

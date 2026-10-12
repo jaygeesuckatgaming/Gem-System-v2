@@ -49,3 +49,92 @@ class VisionClient:
         except Exception as e:
             print(f"✗ Vision image fetch failed: {e}")
         return None
+
+    # --- Face recognition API (vision.py /faces/* endpoints) ---
+
+    async def get_visible_faces(self) -> list:
+        """People visible on the stream right now: [{'name', 'known', 'confidence'}]"""
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(f"{self._base_url()}/faces/current")
+                if response.status_code == 200:
+                    return response.json().get("people", [])
+        except Exception:
+            pass
+        return []
+
+    async def scan_faces_once(self) -> list:
+        """One-shot recognition pass (debug): [{'name', 'known', 'confidence'}]"""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(f"{self._base_url()}/faces/scan")
+                if response.status_code == 200:
+                    return response.json().get("faces", [])
+        except Exception as e:
+            print(f"✗ Face scan failed: {e}")
+        return []
+
+    async def list_enrolled_faces(self) -> list:
+        """Names of enrolled people (empty if recognition is off/unavailable)."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(f"{self._base_url()}/faces/list")
+                if response.status_code == 200:
+                    return response.json().get("people", [])
+        except Exception:
+            pass
+        return []
+
+    async def enroll_face(self, name: str) -> Optional[str]:
+        """Enroll a person from the current frame (requires exactly one face).
+        Returns the enrolled name on success, an error message on failure."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.post(
+                    f"{self._base_url()}/faces/enroll", json={"name": name}
+                )
+                if response.status_code == 200:
+                    return response.json().get("name")
+                return response.json().get("error", "Enrollment failed")
+        except Exception as e:
+            return f"Vision service not available: {e}"
+
+    async def refresh_enrollments(self) -> dict:
+        """Re-scan the photos/ drop folder: {'enrolled': [...], 'skipped': [...]}"""
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(f"{self._base_url()}/faces/refresh")
+                if response.status_code == 200:
+                    return response.json()
+        except Exception:
+            pass
+        return {"enrolled": [], "skipped": []}
+
+    async def delete_enrolled_face(self, name: str) -> bool:
+        """Delete an enrolled person by name."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.delete(f"{self._base_url()}/faces/{name}")
+                return response.status_code == 200 and response.json().get("status") == "ok"
+        except Exception:
+            pass
+        return False
+
+    def _base_url(self) -> str:
+        """Derive the vision service base URL from the configured scan URL."""
+        # e.g. 'http://127.0.0.1:5001/scan' -> 'http://127.0.0.1:5001'
+        from urllib.parse import urlsplit
+        parts = urlsplit(self.scan_url)
+        return f"{parts.scheme}://{parts.netloc}"
+
+    async def list_ndi_sources(self) -> Optional[list]:
+        """NDI source names currently visible on the network (None = service down;
+        [] = no sources found)."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(f"{self._base_url()}/ndi/sources")
+                if response.status_code == 200:
+                    return response.json().get("sources", [])
+        except Exception:
+            pass
+        return None

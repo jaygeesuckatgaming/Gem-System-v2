@@ -2305,9 +2305,12 @@ class ControlPanel(ctk.CTk):
         main_frame = ctk.CTkFrame(self.vision_tab, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=10, pady=5)
         
-        # --- Left column: settings ---
-        left_frame = ctk.CTkFrame(main_frame)
-        left_frame.pack(side="left", fill="y", padx=(0, 10))
+        # --- Left column: settings (scrollable — Save button is pinned below it) ---
+        left_outer = ctk.CTkFrame(main_frame)
+        left_outer.pack(side="left", fill="y", padx=(0, 10))
+
+        left_frame = ctk.CTkScrollableFrame(left_outer, width=330)
+        left_frame.pack(fill="both", expand=True)
         
         # Connection status
         self.vision_status = ctk.CTkLabel(left_frame, text="Status: Checking...", font=ctk.CTkFont(size=16))
@@ -2345,12 +2348,28 @@ class ControlPanel(ctk.CTk):
         self.camera_scan_result = ctk.CTkLabel(left_frame, text="", font=ctk.CTkFont(size=12))
         self.camera_scan_result.pack(anchor="w", padx=20, pady=(0, 5))
         
-        # NDI source name
-        ndi_label = ctk.CTkLabel(left_frame, text="NDI Source Name (optional):", font=ctk.CTkFont(size=14))
+        # NDI source (dropdown populated by scanning the network)
+        ndi_label = ctk.CTkLabel(left_frame, text="NDI Source (scan to pick, empty = first found):", font=ctk.CTkFont(size=14))
         ndi_label.pack(anchor="w", padx=20, pady=(10, 0))
-        
-        self.vision_ndi_entry = ctk.CTkEntry(left_frame)
-        self.vision_ndi_entry.pack(fill="x", padx=20, pady=10)
+
+        ndi_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        ndi_frame.pack(fill="x", padx=20, pady=5)
+
+        self.vision_ndi_combo = ctk.CTkComboBox(ndi_frame, values=[""])
+        self.vision_ndi_combo.pack(side="left", fill="x", expand=True)
+
+        scan_ndi_btn = ctk.CTkButton(ndi_frame, text="Scan NDI", width=100, command=self.scan_ndi_sources)
+        scan_ndi_btn.pack(side="left", padx=(10, 0))
+
+        self.ndi_scan_result = ctk.CTkLabel(left_frame, text="", font=ctk.CTkFont(size=12))
+        self.ndi_scan_result.pack(anchor="w", padx=20, pady=(0, 5))
+
+        # Watch label: what the vision source is ('auto' = Gem looks at the frame itself)
+        watch_label = ctk.CTkLabel(left_frame, text="Watch Label ('auto', or e.g. \"Bob's stream\"):", font=ctk.CTkFont(size=14))
+        watch_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        self.vision_watch_entry = ctk.CTkEntry(left_frame)
+        self.vision_watch_entry.pack(fill="x", padx=20, pady=10)
         
         # Scan URL
         scan_label = ctk.CTkLabel(left_frame, text="Scan URL:", font=ctk.CTkFont(size=14))
@@ -2372,10 +2391,69 @@ class ControlPanel(ctk.CTk):
         
         self.vision_trigger_entry = ctk.CTkEntry(left_frame)
         self.vision_trigger_entry.pack(fill="x", padx=20, pady=10)
-        
-        # Save button
-        save_btn = ctk.CTkButton(left_frame, text="Save Vision Settings", command=self.save_vision_settings)
-        save_btn.pack(pady=20)
+
+        # --- Face Recognition ---
+        face_header = ctk.CTkLabel(left_frame, text="Face Recognition", font=ctk.CTkFont(size=16, weight="bold"))
+        face_header.pack(anchor="w", padx=20, pady=(20, 5))
+
+        self.vision_face_recognition_var = ctk.BooleanVar(value=True)
+        face_check = ctk.CTkCheckBox(left_frame, text="Recognize people on stream", variable=self.vision_face_recognition_var)
+        face_check.pack(anchor="w", padx=20, pady=5)
+
+        self.vision_face_greet_var = ctk.BooleanVar(value=True)
+        greet_check = ctk.CTkCheckBox(left_frame, text="Greet recognized people (TTS + chat)", variable=self.vision_face_greet_var)
+        greet_check.pack(anchor="w", padx=20, pady=5)
+
+        self.vision_face_unknown_var = ctk.BooleanVar(value=True)
+        unknown_check = ctk.CTkCheckBox(left_frame, text="Mention unknown people", variable=self.vision_face_unknown_var)
+        unknown_check.pack(anchor="w", padx=20, pady=5)
+
+        interval_label = ctk.CTkLabel(left_frame, text="Scan Interval (seconds):", font=ctk.CTkFont(size=14))
+        interval_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        self.vision_face_interval_entry = ctk.CTkEntry(left_frame, width=100)
+        self.vision_face_interval_entry.pack(anchor="w", padx=20, pady=5)
+
+        # Enroll: name + capture from the live stream (person must be on camera alone)
+        enroll_label = ctk.CTkLabel(left_frame, text="Enroll Person (one face on camera):", font=ctk.CTkFont(size=14))
+        enroll_label.pack(anchor="w", padx=20, pady=(10, 0))
+
+        enroll_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        enroll_frame.pack(fill="x", padx=20, pady=5)
+
+        self.vision_face_name_entry = ctk.CTkEntry(enroll_frame, width=180, placeholder_text="name")
+        self.vision_face_name_entry.pack(side="left", padx=(0, 10))
+
+        enroll_btn = ctk.CTkButton(enroll_frame, text="Enroll from Camera", width=160, command=self.enroll_face_from_camera)
+        enroll_btn.pack(side="left")
+
+        self.vision_face_status = ctk.CTkLabel(left_frame, text="", font=ctk.CTkFont(size=12))
+        self.vision_face_status.pack(anchor="w", padx=20, pady=(0, 5))
+
+        # Enrolled people list + refresh/delete
+        faces_btn_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
+        faces_btn_frame.pack(fill="x", padx=20, pady=(5, 0))
+
+        refresh_faces_btn = ctk.CTkButton(faces_btn_frame, text="Refresh List", width=110, command=self.refresh_faces_list)
+        refresh_faces_btn.pack(side="left", padx=(0, 10))
+
+        delete_face_btn = ctk.CTkButton(faces_btn_frame, text="Delete (by name)", width=130, command=self.delete_enrolled_face)
+        delete_face_btn.pack(side="left")
+
+        self.vision_faces_list = ctk.CTkTextbox(left_frame, height=100)
+        self.vision_faces_list.pack(fill="x", padx=20, pady=5)
+
+        # Tip about the photos drop folder
+        faces_tip = ctk.CTkLabel(
+            left_frame,
+            text="Tip: you can also drop a <name>.jpg photo into models/faces/photos/",
+            font=ctk.CTkFont(size=12), text_color="gray"
+        )
+        faces_tip.pack(anchor="w", padx=20, pady=(0, 5))
+
+        # Save button — pinned BELOW the scrollable frame so it's always visible
+        save_btn = ctk.CTkButton(left_outer, text="Save Vision Settings", command=self.save_vision_settings)
+        save_btn.pack(pady=10)
         
         # --- Right column: preview ---
         right_frame = ctk.CTkFrame(main_frame)
@@ -2502,14 +2580,24 @@ class ControlPanel(ctk.CTk):
                 self.vision_camera_entry.delete(0, "end")
                 self.vision_camera_entry.insert(0, str(vision.get('camera_index', 0)))
                 
-                self.vision_ndi_entry.delete(0, "end")
-                self.vision_ndi_entry.insert(0, vision.get('ndi_source_name', ''))
+                self.vision_ndi_combo.set(vision.get('ndi_source_name', ''))
+                self.vision_watch_entry.delete(0, "end")
+                self.vision_watch_entry.insert(0, vision.get('watch_label', 'auto'))
                 
                 self.vision_scan_entry.delete(0, "end")
                 self.vision_scan_entry.insert(0, vision.get('scan_url', ''))
                 
                 self.vision_image_entry.delete(0, "end")
                 self.vision_image_entry.insert(0, vision.get('get_image_url', ''))
+
+                face = vision.get('face_recognition', {})
+                self.vision_face_recognition_var.set(face.get('enabled', True))
+                self.vision_face_greet_var.set(face.get('greet_enabled', True))
+                self.vision_face_unknown_var.set(face.get('report_unknown', True))
+                self.vision_face_interval_entry.delete(0, "end")
+                self.vision_face_interval_entry.insert(0, str(face.get('scan_interval_s', 5.0)))
+
+                self.refresh_faces_list()
         except Exception as e:
             print(f"Failed to load vision settings: {e}")
     
@@ -2522,10 +2610,15 @@ class ControlPanel(ctk.CTk):
                 'vision_enabled': self.vision_enabled_var.get(),
                 'vision_image_source': self.vision_source_combo.get(),
                 'vision_camera_index': int(self.vision_camera_entry.get().strip() or 0),
-                'vision_ndi_source_name': self.vision_ndi_entry.get().strip(),
+                'vision_ndi_source_name': self.vision_ndi_combo.get().strip(),
+                'vision_watch_label': self.vision_watch_entry.get().strip() or 'auto',
                 'vision_scan_url': self.vision_scan_entry.get().strip(),
                 'vision_get_image_url': self.vision_image_entry.get().strip(),
-                'vision_trigger_words': trigger_words
+                'vision_trigger_words': trigger_words,
+                'vision_face_recognition_enabled': self.vision_face_recognition_var.get(),
+                'vision_face_greet_enabled': self.vision_face_greet_var.get(),
+                'vision_face_report_unknown': self.vision_face_unknown_var.get(),
+                'vision_face_scan_interval_s': float(self.vision_face_interval_entry.get().strip() or 5.0)
             }
             
             response = httpx.post(f"{SERVER_URL}/api/settings", json=payload, timeout=5)
@@ -2533,7 +2626,77 @@ class ControlPanel(ctk.CTk):
                 print("✓ Vision settings saved")
         except Exception as e:
             print(f"Failed to save vision settings: {e}")
-    
+
+    # --- Face recognition actions ---
+    def enroll_face_from_camera(self):
+        """Enroll the person currently on camera (exactly one face required)"""
+        name = self.vision_face_name_entry.get().strip()
+        if not name:
+            self.vision_face_status.configure(text="Enter a name first.", text_color="orange")
+            return
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/vision/faces/enroll", json={"name": name}, timeout=20)
+            data = response.json()
+            if response.status_code == 200:
+                self.vision_face_status.configure(text=f"✓ Enrolled '{name}'", text_color="green")
+                self.refresh_faces_list()
+            else:
+                self.vision_face_status.configure(text=data.get('error', 'Enrollment failed'), text_color="orange")
+        except Exception as e:
+            self.vision_face_status.configure(text="Vision service not running", text_color="orange")
+
+    def refresh_faces_list(self):
+        """Load the enrolled people list into the textbox"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/vision/faces/list", timeout=10)
+            if response.status_code == 200:
+                people = response.json().get('people', [])
+                self.vision_faces_list.delete("1.0", "end")
+                if people:
+                    self.vision_faces_list.insert("1.0", "\n".join(people))
+                else:
+                    self.vision_faces_list.insert("1.0", "(nobody enrolled yet)")
+        except Exception:
+            self.vision_faces_list.delete("1.0", "end")
+            self.vision_faces_list.insert("1.0", "(vision service not running)")
+
+    def delete_enrolled_face(self):
+        """Delete the enrolled person whose name is in the name entry"""
+        name = self.vision_face_name_entry.get().strip()
+        if not name:
+            self.vision_face_status.configure(text="Enter a name to delete.", text_color="orange")
+            return
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/vision/faces/delete", json={"name": name}, timeout=10)
+            if response.status_code == 200 and response.json().get('status') == 'ok':
+                self.vision_face_status.configure(text=f"✓ Deleted '{name}'", text_color="green")
+            else:
+                self.vision_face_status.configure(text=f"'{name}' not found", text_color="orange")
+            self.refresh_faces_list()
+        except Exception:
+            self.vision_face_status.configure(text="Vision service not running", text_color="orange")
+
+    def scan_ndi_sources(self):
+        """Scan the network for available NDI sources and populate the dropdown"""
+        try:
+            response = httpx.get(f"{SERVER_URL}/api/vision/ndi_sources", timeout=30)
+            if response.status_code == 200:
+                sources = response.json().get('sources', [])
+                self.vision_ndi_combo.configure(values=sources if sources else [""])
+                if sources:
+                    self.ndi_scan_result.configure(text=f"{len(sources)} source(s) found", text_color="green")
+                    # Keep the current selection if still valid, else pick the first
+                    current = self.vision_ndi_combo.get().strip()
+                    if not current or current not in sources:
+                        self.vision_ndi_combo.set(sources[0])
+                else:
+                    self.ndi_scan_result.configure(text="No NDI sources found (is OBS running?)", text_color="orange")
+            else:
+                error = response.json().get('error', 'Scan failed')
+                self.ndi_scan_result.configure(text=error, text_color="orange")
+        except Exception:
+            self.ndi_scan_result.configure(text="Vision service not running", text_color="orange")
+
     # ==================== SSN TAB ====================
     def build_ssn_tab(self):
         """Build the Social Stream Ninja tab"""

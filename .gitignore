@@ -15,6 +15,7 @@ known_speakers.json
 # Test scripts
 test_ollama.py
 test_ssn_relay.py
+test_face_recognition.py
 
 # Cognee data (large, generated)
 cognee_data/

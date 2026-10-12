@@ -8,6 +8,7 @@ import html
 import json
 import os
 import re
+import time
 from collections import deque
 from typing import Optional
 from datetime import datetime
@@ -174,6 +175,9 @@ async def send_response(response: str):
 
     if config.SEND_RESPONSES_TO_CHAT:
         await ssn.send_message(response, targets=config.SSN_TARGETS)
+        # Notify Unreal that Gem is talking + the audio duration.
+        send_osc_message(config.OSC_ADDRESS, "type_1")
+        send_osc_float(config.OSC_ADDRESS, _get_tts_wav_seconds())
 
 
 def trigger_animation_with_duck(animation: str, duck_s: float = 5.0):
@@ -217,6 +221,110 @@ async def handle_twitch_event(event: dict):
         if sub_anim:
             duck_s = getattr(config, 'TWITCH_SUB_ANIMATION_DUCK_S', 5.0)
             trigger_animation_with_duck(sub_anim, duck_s)
+
+
+# Face recognition state (events pushed by the vision service)
+_face_greet_last = {}               # name -> last time Gem greeted them (monotonic)
+_face_greet_global_last = 0.0      # last time Gem greeted anyone (global gap so greetings can't collide)
+_faces_context_cache = {'ts': 0.0, 'people': []}
+
+
+async def get_on_screen_people_context() -> str:
+    """Who is currently visible on the stream camera (face recognition),
+    with a short-lived cache so it doesn't add latency to every message."""
+    now = time.monotonic()
+    if now - _faces_context_cache['ts'] >= 5.0:
+        try:
+            people = await asyncio.wait_for(vision.get_visible_faces(), timeout=1.5)
+            _faces_context_cache.update({'ts': now, 'people': people or []})
+        except Exception:
+            pass  # keep the last known people (or empty) on failure
+    # Don't claim people are visible on stale data: if no successful vision
+    # answer recently (service down / timing out), say nothing instead.
+    if now - _faces_context_cache['ts'] > 20.0:
+        people = []
+    else:
+        people = _faces_context_cache.get('people', [])
+    if not people:
+        return ""
+    parts = []
+    for p in people:
+        if p.get('known', True):
+            parts.append(p['name'])
+        else:
+            parts.append("someone you don't recognize")
+    return f"People currently visible on the stream you are watching: {', '.join(parts)}."
+
+
+async def handle_face_event(data: dict):
+    """React to a face-appear event pushed by the vision service (vision.py).
+    Greets recognized people in-character (throttled), reports unknowns,
+    and records every appearance in memory."""
+    event = data.get('event', '')
+    name = data.get('name', '')
+    known = bool(data.get('known', False))
+    if event != 'appeared' or not name:
+        return
+
+    # Faces enrolled but ignored (channel avatar/logo, Gem's own face):
+    # never greeted, never remembered, never reported
+    ignore = {str(n).strip().lower() for n in getattr(config, 'VISION_FACE_IGNORE_NAMES', []) if str(n).strip()}
+    if name.strip().lower() in ignore:
+        return
+
+    print(f"[FACES] {name} appeared on stream (known={known})")
+
+    # Memory event: record it as a past event — memories are recalled later, so
+    # never phrase them as "right now" (Gem would believe people are still there)
+    if known:
+        await cognee.remember("Gem", f"Gem saw {name} appear on the stream Gem was watching.")
+    elif config.VISION_FACE_REPORT_UNKNOWN:
+        await cognee.remember("Gem", "Gem saw an unrecognized person appear on the stream Gem was watching.")
+
+    # Greeting (throttled per person + globally, so the shared TTS WAV never collides)
+    if not config.VISION_FACE_GREET_ENABLED:
+        return
+    if _paused or audio_player.is_playing():
+        return
+    now_global = time.monotonic()
+    global _face_greet_global_last
+    if now_global - _face_greet_global_last < 20.0:
+        return
+    if now_global - _face_greet_last.get(name, 0.0) < config.VISION_FACE_GREET_COOLDOWN_S:
+        return
+    _face_greet_last[name] = now_global
+    _face_greet_global_last = now_global
+
+    # One simple static prompt + the frame: the multimodal LLM can SEE whose
+    # stream it's on and what's happening — it phrases the greeting itself.
+    # Note: no "appeared/became visible" wording, so the LLM can't dramatize
+    # it as someone "finally showing up".
+    if known:
+        base_prompt = (f"You can see {name} on the stream you are watching right now. "
+                       f"Look at the frame and say hi in character as Gem in one "
+                       f"short, warm, friendly sentence.")
+    else:
+        base_prompt = ("You can see someone you don't recognize on the stream you are "
+                       "watching right now. Look at the frame and say in character as "
+                       "Gem, in one short sentence, that you see someone new.")
+
+    watch_label = getattr(config, 'VISION_WATCH_LABEL', 'auto').strip()
+    if watch_label and watch_label.lower() != 'auto':
+        base_prompt += f" (You are watching: {watch_label}.)"
+
+    image_base64 = await vision.get_image_base64()
+    if image_base64:
+        response = await llm.chat_with_image(base_prompt, image_base64, system_prompt=config.SYSTEM_PROMPT)
+    else:
+        response = await llm.chat(base_prompt, system_prompt=config.SYSTEM_PROMPT)
+    if not response or response.startswith("Error"):
+        response = f"Hey {name}, good to see you!" if known else "Oh hey, I see someone new!"
+
+    print(f"[GEM] {response}")
+    await cognee.remember("Gem", response)
+    add_to_chat_history("Gem", response)
+    _last_ai_responses.append(html.unescape(response).strip())
+    await send_response(response)
 
 
 def _estimate_speech_seconds(text: str) -> float:
@@ -455,6 +563,16 @@ def save_config():
             'VISION_IMAGE_SOURCE': (config.VISION_IMAGE_SOURCE, True),
             'VISION_CAMERA_INDEX': (config.VISION_CAMERA_INDEX, False),
             'VISION_NDI_SOURCE_NAME': (config.VISION_NDI_SOURCE_NAME, True),
+            'VISION_FRAME_MAX_EDGE': (config.VISION_FRAME_MAX_EDGE, False),
+            'VISION_WATCH_LABEL': (config.VISION_WATCH_LABEL, True),
+            'VISION_FACE_DIR': (config.VISION_FACE_DIR, True),
+            'VISION_FACE_RECOGNITION_ENABLED': (config.VISION_FACE_RECOGNITION_ENABLED, False),
+            'VISION_FACE_SCAN_INTERVAL_S': (config.VISION_FACE_SCAN_INTERVAL_S, False),
+            'VISION_FACE_MATCH_THRESHOLD': (config.VISION_FACE_MATCH_THRESHOLD, False),
+            'VISION_FACE_GREET_ENABLED': (config.VISION_FACE_GREET_ENABLED, False),
+            'VISION_FACE_GREET_COOLDOWN_S': (config.VISION_FACE_GREET_COOLDOWN_S, False),
+            'VISION_FACE_ABSENCE_RESET_S': (config.VISION_FACE_ABSENCE_RESET_S, False),
+            'VISION_FACE_REPORT_UNKNOWN': (config.VISION_FACE_REPORT_UNKNOWN, False),
             'BROWSER_ENABLED': (config.BROWSER_ENABLED, False),
             'BROWSER_LLM_PROVIDER': (config.BROWSER_LLM_PROVIDER, True),
             'BROWSER_OLLAMA_MODEL': (config.BROWSER_OLLAMA_MODEL, True),
@@ -671,6 +789,20 @@ def is_vision_command(text: str) -> bool:
         if word.lower() in text_lower:
             return True
     return False
+
+
+def is_who_do_you_see_command(text: str) -> bool:
+    """Check if a message asks who is currently visible on the stream camera
+    (answered from face recognition, before the generic vision trigger)."""
+    text_lower = text.lower().strip()
+    phrases = [
+        "who do you see", "who can you see", "who do you recognize",
+        "who's on screen", "who is on screen", "whos on screen",
+        "who's on the screen", "who is on the screen",
+        "who is that on screen", "who's that on screen",
+        "who is with you", "who's with you",
+    ]
+    return any(phrase in text_lower for phrase in phrases)
 
 
 def is_stop_music_command(text: str) -> bool:
@@ -1274,6 +1406,34 @@ async def handle_incoming_message(data: dict):
             await ssn.send_message(f"OpenCode error: {e}", targets=config.SSN_TARGETS)
         return
     
+    # Check for "who do you see" (face recognition answer — must run BEFORE the
+    # generic vision trigger, since "who do you see" contains the word "see")
+    if config.VISION_FACE_RECOGNITION_ENABLED and is_who_do_you_see_command(message):
+        print(f"👀 Who-do-you-see command detected: '{message}'")
+        await cognee.remember(speaker, message)
+
+        faces_context = await get_on_screen_people_context()
+        if not faces_context:
+            faces_context = ("You cannot currently see any recognized people on the "
+                             "stream you are watching.")
+
+        # Send the frame + recognized names to the multimodal LLM if possible
+        image_base64 = await vision.get_image_base64()
+        prompt = (f"{faces_context} User asks: '{message}'. Answer in character as Gem. "
+                  f"Use the recognized names above — don't invent people who aren't listed. "
+                  f"If you can tell whose stream or video you are watching from the frame, "
+                  f"mention it naturally.")
+        if image_base64:
+            response = await llm.chat_with_image(prompt, image_base64, system_prompt=config.SYSTEM_PROMPT)
+        else:
+            response = await llm.chat(prompt, system_prompt=config.SYSTEM_PROMPT)
+
+        print(f"[GEM] {response}")
+        await cognee.remember("Gem", response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        await send_response(response)
+        return
+
     # Check for vision command (intercept before LLM)
     if config.VISION_ENABLED and is_vision_command(message):
         print(f"👁️ Vision command detected: '{message}'")
@@ -1373,6 +1533,12 @@ async def handle_incoming_message(data: dict):
     chat_history = get_chat_history_context()
     if chat_history:
         system_prompt = f"{system_prompt}\n\n{chat_history}"
+    
+    # Let Gem know who is currently visible on the stream camera (face recognition)
+    if config.VISION_FACE_RECOGNITION_ENABLED and vision.enabled:
+        faces_ctx = await get_on_screen_people_context()
+        if faces_ctx:
+            system_prompt = f"{system_prompt}\n\n{faces_ctx}"
     
     # Build tools for the LLM (animations + browser via generic tools)
     tools = []
@@ -1616,7 +1782,15 @@ async def api_status():
             'get_image_url': config.VISION_GET_IMAGE_URL,
             'image_source': config.VISION_IMAGE_SOURCE,
             'camera_index': config.VISION_CAMERA_INDEX,
-            'ndi_source_name': config.VISION_NDI_SOURCE_NAME
+            'ndi_source_name': config.VISION_NDI_SOURCE_NAME,
+            'watch_label': config.VISION_WATCH_LABEL,
+            'face_recognition': {
+                'enabled': config.VISION_FACE_RECOGNITION_ENABLED,
+                'greet_enabled': config.VISION_FACE_GREET_ENABLED,
+                'scan_interval_s': config.VISION_FACE_SCAN_INTERVAL_S,
+                'greet_cooldown_s': config.VISION_FACE_GREET_COOLDOWN_S,
+                'report_unknown': config.VISION_FACE_REPORT_UNKNOWN
+            }
         },
         'browser': {
             'enabled': config.BROWSER_ENABLED,
@@ -1934,6 +2108,23 @@ async def api_update_settings():
         config.VISION_CAMERA_INDEX = data['vision_camera_index']
     if 'vision_ndi_source_name' in data:
         config.VISION_NDI_SOURCE_NAME = data['vision_ndi_source_name']
+    if 'vision_watch_label' in data:
+        config.VISION_WATCH_LABEL = data['vision_watch_label'].strip() or 'auto'
+    if 'vision_frame_max_edge' in data:
+        try:
+            config.VISION_FRAME_MAX_EDGE = int(data['vision_frame_max_edge'])
+        except (TypeError, ValueError):
+            pass
+    if 'vision_face_recognition_enabled' in data:
+        config.VISION_FACE_RECOGNITION_ENABLED = data['vision_face_recognition_enabled']
+    if 'vision_face_scan_interval_s' in data:
+        config.VISION_FACE_SCAN_INTERVAL_S = data['vision_face_scan_interval_s']
+    if 'vision_face_greet_enabled' in data:
+        config.VISION_FACE_GREET_ENABLED = data['vision_face_greet_enabled']
+    if 'vision_face_greet_cooldown_s' in data:
+        config.VISION_FACE_GREET_COOLDOWN_S = data['vision_face_greet_cooldown_s']
+    if 'vision_face_report_unknown' in data:
+        config.VISION_FACE_REPORT_UNKNOWN = data['vision_face_report_unknown']
     if 'browser_enabled' in data:
         config.BROWSER_ENABLED = data['browser_enabled']
     if 'browser_llm_provider' in data:
@@ -2054,6 +2245,60 @@ async def api_vision_cameras():
     return jsonify({'status': 'ok', 'cameras': cameras})
 
 
+@app.route('/api/vision/faces/current', methods=['GET'])
+async def api_vision_faces_current():
+    """Proxy: who is visible on the stream camera right now"""
+    people = await vision.get_visible_faces()
+    return jsonify({'status': 'ok', 'people': people})
+
+
+@app.route('/api/vision/ndi_sources', methods=['GET'])
+async def api_vision_ndi_sources():
+    """Proxy: list NDI sources currently visible on the network"""
+    sources = await vision.list_ndi_sources()
+    if sources is None:
+        return jsonify({'status': 'error', 'error': 'Vision service not available'}), 503
+    return jsonify({'status': 'ok', 'sources': sources})
+
+
+@app.route('/api/vision/faces/list', methods=['GET'])
+async def api_vision_faces_list():
+    """Proxy: list enrolled people"""
+    people = await vision.list_enrolled_faces()
+    return jsonify({'status': 'ok', 'people': people, 'count': len(people)})
+
+
+@app.route('/api/vision/faces/enroll', methods=['POST'])
+async def api_vision_faces_enroll():
+    """Proxy: enroll a person from the current frame (exactly one face required)"""
+    data = await request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'status': 'error', 'error': 'No name specified'}), 400
+    result = await vision.enroll_face(name)
+    if result == name:
+        return jsonify({'status': 'ok', 'name': name})
+    return jsonify({'status': 'error', 'error': result or 'Enrollment failed'}), 400
+
+
+@app.route('/api/vision/faces/refresh', methods=['POST'])
+async def api_vision_faces_refresh():
+    """Proxy: re-scan the photos/ drop folder for new enrollments"""
+    result = await vision.refresh_enrollments()
+    return jsonify({'status': 'ok', **result})
+
+
+@app.route('/api/vision/faces/delete', methods=['POST'])
+async def api_vision_faces_delete():
+    """Proxy: delete an enrolled person by name"""
+    data = await request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'status': 'error', 'error': 'No name specified'}), 400
+    success = await vision.delete_enrolled_face(name)
+    return jsonify({'status': 'ok' if success else 'not_found'})
+
+
 @app.route('/api/osc/actions', methods=['GET'])
 async def api_osc_actions_get():
     """Get custom OSC actions"""
@@ -2129,6 +2374,24 @@ def send_osc_message(address: str, value) -> bool:
         return True
     except Exception as e:
         print(f"OSC failed: {e}")
+        return False
+
+
+def send_osc_float(address: str, value: float) -> bool:
+    """Send a plain float OSC message (UDP), e.g. an audio duration in seconds."""
+    if not address:
+        print(f"OSC skipped: empty address (float value={value})")
+        return False
+    try:
+        from pythonosc import udp_client, osc_message_builder
+        builder = osc_message_builder.OscMessageBuilder(address=address)
+        builder.add_arg(float(value), builder.ARG_TYPE_FLOAT)
+        client = udp_client.SimpleUDPClient(config.OSC_IP, config.OSC_PORT)
+        client.send(builder.build())
+        print(f"OSC SENT (float): {value} to {config.OSC_IP}:{config.OSC_PORT} {address}")
+        return True
+    except Exception as e:
+        print(f"OSC (float) failed: {e}")
         return False
 
 
@@ -2489,6 +2752,15 @@ async def api_music_unduck():
     data = await request.get_json(silent=True) or {}
     music.unduck_music(release_ms=data.get('release_ms', config.AUDIO_DUCK_RELEASE_MS))
     return jsonify({'status': 'ok', 'unducked': True})
+
+
+@app.route('/api/face_event', methods=['POST'])
+async def face_event():
+    """Called by the vision service when a face appears on the stream.
+    Fire-and-forget: the greeting pipeline runs in the background."""
+    data = await request.get_json()
+    asyncio.create_task(handle_face_event(data))
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/chat', methods=['POST'])
