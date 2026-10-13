@@ -794,8 +794,9 @@ def is_vision_command(text: str) -> bool:
 
 
 def is_who_do_you_see_command(text: str) -> bool:
-    """Check if a message asks who is currently visible on the stream camera
-    (answered from face recognition, before the generic vision trigger)."""
+    """Check if a message asks who/what Gem is currently watching or who is
+    visible on the stream camera (answered from face recognition + the frame,
+    before the generic vision trigger)."""
     text_lower = text.lower().strip()
     phrases = [
         "who do you see", "who can you see", "who do you recognize",
@@ -803,6 +804,10 @@ def is_who_do_you_see_command(text: str) -> bool:
         "who's on the screen", "who is on the screen",
         "who is that on screen", "who's that on screen",
         "who is with you", "who's with you",
+        "who are you watching", "what are you watching", "what are you watchin",
+        "who are you watchin", "what stream are you watching", "which stream",
+        "whose stream is this", "who's stream is this", "whos stream is this",
+        "who stream is this", "what are you looking at", "what're you watching",
     ]
     return any(phrase in text_lower for phrase in phrases)
 
@@ -1422,9 +1427,12 @@ async def handle_incoming_message(data: dict):
         # Send the frame + recognized names to the multimodal LLM if possible
         image_base64 = await vision.get_image_base64()
         prompt = (f"{faces_context} User asks: '{message}'. Answer in character as Gem. "
-                  f"Use the recognized names above — don't invent people who aren't listed. "
-                  f"If you can tell whose stream or video you are watching from the frame, "
-                  f"mention it naturally.")
+                  f"Identify who/what you are watching ONLY from evidence: (a) any recognized "
+                  f"names listed above, and (b) text visibly shown in the frame — channel "
+                  f"names, stream overlays, watermarks, titles, alerts. Read that text "
+                  f"carefully and use it. NEVER invent or guess a name that isn't in the "
+                  f"list or visible in the frame — if you can't tell who it is, say so "
+                  f"in character and describe what's on screen instead.")
         if image_base64:
             response = await llm.chat_with_image(prompt, image_base64, system_prompt=config.SYSTEM_PROMPT)
         else:
