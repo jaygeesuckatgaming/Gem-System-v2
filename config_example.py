@@ -19,6 +19,15 @@ TWITCH_CLIENT_SECRET = ''      # app secret (enables EventSub)
 TWITCH_OAUTH_TOKEN = ''        # broadcaster user access token
 TWITCH_REFRESH_TOKEN = ''      # broadcaster refresh token
 TWITCH_CHANNEL = ''            # channel name to watch
+# OSC animation sent when someone subscribes (empty = no animation)
+TWITCH_SUB_ANIMATION = ''
+# How long (seconds) to duck music when the sub animation plays its audio clip
+TWITCH_SUB_ANIMATION_DUCK_S = 39.0
+
+# Countdown command (spoken sequence generated in code, not by the LLM)
+COUNTDOWN_MAX = 100        # max numbers in a single countdown
+COUNTDOWN_TTS_CHUNK = 10   # numbers sent to TTS per request (spoken as words)
+COUNTDOWN_CHUNK_DELAY_S = 3.0  # wait between chunks so each plays before overwrite
 
 # Cognee Memory
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
