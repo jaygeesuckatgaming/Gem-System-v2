@@ -569,6 +569,8 @@ def save_config():
             'VISION_FACE_RECOGNITION_ENABLED': (config.VISION_FACE_RECOGNITION_ENABLED, False),
             'VISION_FACE_SCAN_INTERVAL_S': (config.VISION_FACE_SCAN_INTERVAL_S, False),
             'VISION_FACE_MATCH_THRESHOLD': (config.VISION_FACE_MATCH_THRESHOLD, False),
+            'VISION_FACE_MIN_WIDTH_PX': (config.VISION_FACE_MIN_WIDTH_PX, False),
+            'VISION_FACE_DETECTION_THRESHOLD': (config.VISION_FACE_DETECTION_THRESHOLD, False),
             'VISION_FACE_GREET_ENABLED': (config.VISION_FACE_GREET_ENABLED, False),
             'VISION_FACE_GREET_COOLDOWN_S': (config.VISION_FACE_GREET_COOLDOWN_S, False),
             'VISION_FACE_ABSENCE_RESET_S': (config.VISION_FACE_ABSENCE_RESET_S, False),
@@ -2125,6 +2127,16 @@ async def api_update_settings():
         config.VISION_FACE_GREET_COOLDOWN_S = data['vision_face_greet_cooldown_s']
     if 'vision_face_report_unknown' in data:
         config.VISION_FACE_REPORT_UNKNOWN = data['vision_face_report_unknown']
+    if 'vision_face_detection_threshold' in data:
+        try:
+            config.VISION_FACE_DETECTION_THRESHOLD = float(data['vision_face_detection_threshold'])
+        except (TypeError, ValueError):
+            pass
+    if 'vision_face_min_width_px' in data:
+        try:
+            config.VISION_FACE_MIN_WIDTH_PX = int(data['vision_face_min_width_px'])
+        except (TypeError, ValueError):
+            pass
     if 'browser_enabled' in data:
         config.BROWSER_ENABLED = data['browser_enabled']
     if 'browser_llm_provider' in data:
@@ -2270,12 +2282,15 @@ async def api_vision_faces_list():
 
 @app.route('/api/vision/faces/enroll', methods=['POST'])
 async def api_vision_faces_enroll():
-    """Proxy: enroll a person from the current frame (exactly one face required)"""
+    """Proxy: enroll a person from the current frame. Optional 'region'
+    [x0, y0, x1, y1] (fractions 0-1, GUI drag-selection) restricts which
+    face gets enrolled."""
     data = await request.get_json()
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'status': 'error', 'error': 'No name specified'}), 400
-    result = await vision.enroll_face(name)
+    region = data.get('region')
+    result = await vision.enroll_face(name, region)
     if result == name:
         return jsonify({'status': 'ok', 'name': name})
     return jsonify({'status': 'error', 'error': result or 'Enrollment failed'}), 400
@@ -2286,6 +2301,15 @@ async def api_vision_faces_refresh():
     """Proxy: re-scan the photos/ drop folder for new enrollments"""
     result = await vision.refresh_enrollments()
     return jsonify({'status': 'ok', **result})
+
+
+@app.route('/api/vision/faces/scan', methods=['POST'])
+async def api_vision_faces_scan():
+    """Proxy: one-shot face scan (detection + recognition, for tuning/debug).
+    Optional ?threshold=X temporarily overrides the detection cutoff."""
+    threshold = request.args.get('threshold', type=float)
+    faces = await vision.scan_faces_once(threshold)
+    return jsonify({'status': 'ok', 'faces': faces})
 
 
 @app.route('/api/vision/faces/delete', methods=['POST'])

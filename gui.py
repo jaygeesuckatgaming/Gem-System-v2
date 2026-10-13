@@ -2438,7 +2438,10 @@ class ControlPanel(ctk.CTk):
         refresh_faces_btn.pack(side="left", padx=(0, 10))
 
         delete_face_btn = ctk.CTkButton(faces_btn_frame, text="Delete (by name)", width=130, command=self.delete_enrolled_face)
-        delete_face_btn.pack(side="left")
+        delete_face_btn.pack(side="left", padx=(0, 10))
+
+        scan_faces_btn = ctk.CTkButton(faces_btn_frame, text="Scan Now", width=90, command=self.scan_faces_now)
+        scan_faces_btn.pack(side="left")
 
         self.vision_faces_list = ctk.CTkTextbox(left_frame, height=100)
         self.vision_faces_list.pack(fill="x", padx=20, pady=5)
@@ -2467,13 +2470,28 @@ class ControlPanel(ctk.CTk):
         
         self.preview_toggle_btn = ctk.CTkButton(preview_btn_frame, text="Start Preview", width=120, command=self.toggle_vision_preview)
         self.preview_toggle_btn.pack(side="left", padx=(0, 10))
-        
+
+        self.clear_area_btn = ctk.CTkButton(preview_btn_frame, text="Clear Area", width=100, command=self.clear_face_selection)
+        self.clear_area_btn.pack(side="left", padx=(0, 10))
+
         self.preview_status_label = ctk.CTkLabel(preview_btn_frame, text="Preview: Off", font=ctk.CTkFont(size=13))
         self.preview_status_label.pack(side="left", padx=10)
-        
+
         # Preview image display (16:9)
         self.preview_image_label = ctk.CTkLabel(right_frame, text="No preview", width=640, height=360, fg_color="#1a1a1a")
         self.preview_image_label.pack(padx=20, pady=10)
+
+        # Drag-to-select a face area on the preview (like cv2.selectROI, but
+        # integrated into the panel): enrollment then only uses faces inside it
+        self._face_selection = None   # (x0, y0, x1, y1) in display pixels
+        self._drag_start = None
+        self._preview_base = None     # last fetched 640x360 preview image
+        self.preview_image_label.bind("<ButtonPress-1>", self._preview_press)
+        self.preview_image_label.bind("<B1-Motion>", self._preview_drag)
+        self.preview_image_label.bind("<ButtonRelease-1>", self._preview_release)
+        preview_hint = ctk.CTkLabel(right_frame, text="Drag on the preview to select a face area — Enroll will only use faces inside it",
+                                    font=ctk.CTkFont(size=12), text_color="gray")
+        preview_hint.pack(pady=(0, 5))
         
         # Load current settings
         self.load_vision_settings()
@@ -2499,15 +2517,22 @@ class ControlPanel(ctk.CTk):
         self.preview_status_label.configure(text="Preview: Off", text_color="gray")
     
     def _update_preview(self):
-        """Fetch and display the current camera frame"""
+        """Fetch and display the current camera frame (with the face-selection
+        box drawn on top if one is active; refresh pauses while dragging)"""
         if not getattr(self, '_preview_active', False):
             return
-        
+
+        # Don't swap the frame mid-drag (the underlying image would shift
+        # under the pointer) — selection rectangle stays drawn
+        if getattr(self, '_drag_start', None) is not None:
+            self.after(200, self._update_preview)
+            return
+
         try:
             import base64
             from io import BytesIO
             from PIL import Image, ImageTk
-            
+
             response = httpx.get(f"{SERVER_URL}/api/vision/image", timeout=10)
             if response.status_code == 200:
                 data = response.json()
@@ -2516,17 +2541,72 @@ class ControlPanel(ctk.CTk):
                     image_bytes = base64.b64decode(image_base64)
                     pil_image = Image.open(BytesIO(image_bytes))
                     pil_image = pil_image.resize((640, 360), Image.Resampling.LANCZOS)
-                    ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(640, 360))
-                    self.preview_image_label.configure(image=ctk_image, text="")
+                    self._preview_base = pil_image
+                    self._display_preview_with_selection()
                 else:
                     self.preview_image_label.configure(image=None, text="No image available")
             else:
                 self.preview_image_label.configure(image=None, text="Vision service not running")
         except Exception as e:
             self.preview_image_label.configure(image=None, text="Vision service not running")
-        
+
         # Schedule next update
         self.after(500, self._update_preview)
+
+    # --- Face area selection on the preview (drag like cv2.selectROI) ---
+    def _preview_press(self, event):
+        if not getattr(self, '_preview_active', False):
+            return
+        self._drag_start = (event.x, event.y)
+        self._face_selection = None
+
+    def _preview_drag(self, event):
+        if getattr(self, '_drag_start', None) is None:
+            return
+        self._face_selection = self._norm_box(self._drag_start, (event.x, event.y))
+        self._display_preview_with_selection()
+
+    def _preview_release(self, event):
+        if getattr(self, '_drag_start', None) is None:
+            return
+        self._face_selection = self._norm_box(self._drag_start, (event.x, event.y))
+        self._drag_start = None
+        x0, y0, x1, y1 = self._face_selection
+        if (x1 - x0) * (y1 - y0) < 100:
+            # Accidental click — treat as clear
+            self._face_selection = None
+            self.vision_face_status.configure(text="Face area cleared", text_color="gray")
+        else:
+            self.vision_face_status.configure(
+                text="Face area selected — Enroll will only use faces inside it",
+                text_color="green")
+        self._display_preview_with_selection()
+
+    def _norm_box(self, p0, p1):
+        """Normalized, clamped, ordered selection box in display pixels."""
+        x0, x1 = sorted((max(0, p0[0]), min(640, p1[0])))
+        y0, y1 = sorted((max(0, p0[1]), min(360, p1[1])))
+        return (x0, y0, x1, y1)
+
+    def _display_preview_with_selection(self):
+        """Show the last preview frame with the selection rectangle drawn."""
+        if getattr(self, '_preview_base', None) is None:
+            return
+        from PIL import ImageDraw
+        img = self._preview_base.copy()
+        sel = getattr(self, '_face_selection', None)
+        if sel:
+            d = ImageDraw.Draw(img)
+            d.rectangle(sel, outline="#FF3333", width=2)
+        ctk_image = ctk.CTkImage(light_image=img, dark_image=img, size=(640, 360))
+        self._preview_photo = ctk_image  # keep a reference
+        self.preview_image_label.configure(image=ctk_image, text="")
+
+    def clear_face_selection(self):
+        """Clear the selected face area"""
+        self._face_selection = None
+        self._display_preview_with_selection()
+        self.vision_face_status.configure(text="Face area cleared", text_color="gray")
     
     def start_vision_service(self):
         """Launch the vision service (vision.py)"""
@@ -2629,13 +2709,20 @@ class ControlPanel(ctk.CTk):
 
     # --- Face recognition actions ---
     def enroll_face_from_camera(self):
-        """Enroll the person currently on camera (exactly one face required)"""
+        """Enroll the person currently on camera. If a face area is selected on
+        the preview, only faces inside it are enrolled."""
         name = self.vision_face_name_entry.get().strip()
         if not name:
             self.vision_face_status.configure(text="Enter a name first.", text_color="orange")
             return
+        payload = {"name": name}
+        sel = getattr(self, '_face_selection', None)
+        if sel:
+            x0, y0, x1, y1 = sel
+            # Display pixels -> fractions of the frame
+            payload["region"] = [x0 / 640.0, y0 / 360.0, x1 / 640.0, y1 / 360.0]
         try:
-            response = httpx.post(f"{SERVER_URL}/api/vision/faces/enroll", json={"name": name}, timeout=20)
+            response = httpx.post(f"{SERVER_URL}/api/vision/faces/enroll", json=payload, timeout=20)
             data = response.json()
             if response.status_code == 200:
                 self.vision_face_status.configure(text=f"✓ Enrolled '{name}'", text_color="green")
@@ -2646,14 +2733,34 @@ class ControlPanel(ctk.CTk):
             self.vision_face_status.configure(text="Vision service not running", text_color="orange")
 
     def refresh_faces_list(self):
-        """Load the enrolled people list into the textbox"""
+        """Process any new photos in the photos/ drop folder, then load the enrolled list"""
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/vision/faces/refresh", timeout=60)
+            if response.status_code == 200:
+                data = response.json()
+                if data.get('enrolled'):
+                    self.vision_face_status.configure(
+                        text=f"✓ Enrolled from photos: {', '.join(data['enrolled'])}",
+                        text_color="green")
+                elif data.get('skipped'):
+                    self.vision_face_status.configure(
+                        text=f"Photo skipped (need exactly one face): {', '.join(data['skipped'])}",
+                        text_color="orange")
+        except Exception:
+            pass
         try:
             response = httpx.get(f"{SERVER_URL}/api/vision/faces/list", timeout=10)
             if response.status_code == 200:
                 people = response.json().get('people', [])
                 self.vision_faces_list.delete("1.0", "end")
                 if people:
-                    self.vision_faces_list.insert("1.0", "\n".join(people))
+                    lines = []
+                    for p in people:
+                        if isinstance(p, dict):
+                            lines.append(f"{p.get('name', '?')} ({p.get('samples', '?')} samples)")
+                        else:
+                            lines.append(str(p))
+                    self.vision_faces_list.insert("1.0", "\n".join(lines))
                 else:
                     self.vision_faces_list.insert("1.0", "(nobody enrolled yet)")
         except Exception:
@@ -2673,6 +2780,37 @@ class ControlPanel(ctk.CTk):
             else:
                 self.vision_face_status.configure(text=f"'{name}' not found", text_color="orange")
             self.refresh_faces_list()
+        except Exception:
+            self.vision_face_status.configure(text="Vision service not running", text_color="orange")
+
+    def scan_faces_now(self):
+        """Scan: shows what the detector sees right now (with confidence scores).
+        If nothing is found, retries at a very low cutoff (deep scan) to reveal
+        what score hard-to-detect faces (e.g. VTuber avatars) actually get —
+        then VISION_FACE_DETECTION_THRESHOLD can be set just below that."""
+        try:
+            response = httpx.post(f"{SERVER_URL}/api/vision/faces/scan", timeout=20)
+            faces = response.json().get('faces', []) if response.status_code == 200 else []
+            prefix = "Scan"
+            if not faces:
+                # Deep scan: temporary very low detection cutoff
+                response = httpx.post(f"{SERVER_URL}/api/vision/faces/scan?threshold=0.05", timeout=30)
+                if response.status_code == 200:
+                    faces = response.json().get('faces', [])
+                    prefix = "Deep scan"
+                    # Filter out noise: keep significant faces only
+                    faces = [f for f in faces if f.get('width', 0) >= 20 or f.get('detection', 0) >= 0.15]
+            if not faces:
+                self.vision_face_status.configure(
+                    text=f"{prefix}: no faces detected at all", text_color="orange")
+            else:
+                parts = []
+                for f in faces[:5]:
+                    label = "?" if f.get('name') == 'unknown' else f.get('name', '?')
+                    parts.append(f"{label} [det {f.get('detection', 0):.2f}]")
+                self.vision_face_status.configure(
+                    text=f"{prefix}: " + ", ".join(parts),
+                    text_color="green" if prefix == "Scan" else "orange")
         except Exception:
             self.vision_face_status.configure(text="Vision service not running", text_color="orange")
 

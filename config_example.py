@@ -218,7 +218,15 @@ VISION_WATCH_LABEL = "auto"  # What the vision source shows, used when greeting 
 VISION_FACE_DIR = "models/faces"
 VISION_FACE_RECOGNITION_ENABLED = True
 VISION_FACE_SCAN_INTERVAL_S = 5.0
-VISION_FACE_MATCH_THRESHOLD = 0.363   # SFace cosine similarity (0.363 = recommended identity threshold)
+# SFace cosine similarity cutoff. 0.363 = the human-face default; 0.45 suppresses
+# false matches between different VTuber avatars (they cluster oddly in SFace space)
+VISION_FACE_MATCH_THRESHOLD = 0.45
+# Ignore detected "faces" narrower than this (pixels) — kills chat avatars, emojis and
+# UI noise that YuNet detects but that shouldn't be tracked or greeted
+VISION_FACE_MIN_WIDTH_PX = 30
+# YuNet detection confidence cutoff. 0.6 = humans. Lower to ~0.45 if stylized/animal
+# VTuber avatar faces aren't detected ("No face detected" on enroll); lower = more false positives
+VISION_FACE_DETECTION_THRESHOLD = 0.6
 VISION_FACE_GREET_ENABLED = True
 VISION_FACE_GREET_COOLDOWN_S = 900    # Per-person: don't re-greet within this many seconds
 VISION_FACE_ABSENCE_RESET_S = 120     # Person must be off-screen this long to count as a new appearance

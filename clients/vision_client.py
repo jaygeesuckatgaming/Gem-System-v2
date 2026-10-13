@@ -63,11 +63,16 @@ class VisionClient:
             pass
         return []
 
-    async def scan_faces_once(self) -> list:
-        """One-shot recognition pass (debug): [{'name', 'known', 'confidence'}]"""
+    async def scan_faces_once(self, threshold=None) -> list:
+        """One-shot recognition pass (debug): [{'name', 'known', 'confidence',
+        'detection', 'width'}]. Optional threshold temporarily overrides the
+        detection cutoff for this scan only."""
         try:
+            url = f"{self._base_url()}/faces/scan"
+            if threshold is not None:
+                url += f"?threshold={threshold}"
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.post(f"{self._base_url()}/faces/scan")
+                response = await client.post(url)
                 if response.status_code == 200:
                     return response.json().get("faces", [])
         except Exception as e:
@@ -85,13 +90,18 @@ class VisionClient:
             pass
         return []
 
-    async def enroll_face(self, name: str) -> Optional[str]:
-        """Enroll a person from the current frame (requires exactly one face).
+    async def enroll_face(self, name: str, region=None) -> Optional[str]:
+        """Enroll a person from the current frame. Optional region
+        [x0, y0, x1, y1] (fractions 0-1 of the frame, from the GUI's
+        drag-selection) restricts enrollment to faces inside that box.
         Returns the enrolled name on success, an error message on failure."""
         try:
+            payload = {"name": name}
+            if region is not None:
+                payload["region"] = region
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(
-                    f"{self._base_url()}/faces/enroll", json={"name": name}
+                    f"{self._base_url()}/faces/enroll", json=payload
                 )
                 if response.status_code == 200:
                     return response.json().get("name")

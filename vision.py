@@ -91,6 +91,8 @@ def load_config():
     settings['face_recognition_enabled'] = getattr(cfg, 'VISION_FACE_RECOGNITION_ENABLED', False)
     settings['face_scan_interval_s'] = float(getattr(cfg, 'VISION_FACE_SCAN_INTERVAL_S', 5.0))
     settings['face_match_threshold'] = float(getattr(cfg, 'VISION_FACE_MATCH_THRESHOLD', 0.363))
+    settings['face_min_width_px'] = int(getattr(cfg, 'VISION_FACE_MIN_WIDTH_PX', 30))
+    settings['face_detection_threshold'] = float(getattr(cfg, 'VISION_FACE_DETECTION_THRESHOLD', 0.6))
     settings['face_absence_reset_s'] = float(getattr(cfg, 'VISION_FACE_ABSENCE_RESET_S', 120.0))
     settings['face_report_unknown'] = getattr(cfg, 'VISION_FACE_REPORT_UNKNOWN', True)
     settings['face_ignore_names'] = [str(n).strip().lower() for n in getattr(cfg, 'VISION_FACE_IGNORE_NAMES', []) if str(n).strip()]
@@ -260,7 +262,8 @@ class FaceRecognizer:
 
     def __init__(self, face_dir, camera_stream, match_threshold=0.363,
                  scan_interval_s=5.0, absence_reset_s=120.0, report_unknown=True,
-                 event_url=None, ignore_names=None):
+                 event_url=None, ignore_names=None, detection_threshold=0.6,
+                 min_width_px=30):
         self.face_dir = os.path.abspath(face_dir)
         self.enrolled_dir = os.path.join(self.face_dir, 'enrolled')
         self.photos_dir = os.path.join(self.face_dir, 'photos')
@@ -269,6 +272,10 @@ class FaceRecognizer:
 
         self.camera_stream = camera_stream
         self.match_threshold = float(match_threshold)
+        # YuNet detection confidence cutoff (lower it for stylized/animal VTuber faces)
+        self.detection_threshold = float(detection_threshold)
+        # Faces narrower than this many pixels are ignored (chat avatars, UI noise)
+        self.min_width_px = int(min_width_px)
         self.scan_interval_s = float(scan_interval_s)
         self.absence_reset_s = float(absence_reset_s)
         self.report_unknown = bool(report_unknown)
@@ -285,8 +292,10 @@ class FaceRecognizer:
                 f"{self.YUNET_FILE} and {self.SFACE_FILE} from the official "
                 f"opencv_zoo repository (github.com/opencv/opencv_zoo)."
             )
-        # score_threshold: YuNet detection confidence; 0.6 balances misses vs false positives
-        self.detector = cv2.FaceDetectorYN.create(yunet_path, "", (320, 240), score_threshold=0.6)
+        # score_threshold: 0.6 = real humans; lower via VISION_FACE_DETECTION_THRESHOLD
+        # if stylized/animal VTuber avatar faces aren't detected
+        self.detector = cv2.FaceDetectorYN.create(yunet_path, "", (320, 240),
+                                                  score_threshold=self.detection_threshold)
         self.recognizer = cv2.FaceRecognizerSF.create(sface_path, "")
 
         self.enrolled = {}   # name -> list of np.ndarray (1,128) sample embeddings
@@ -379,21 +388,56 @@ class FaceRecognizer:
         self.load_enrolled()
         return enrolled, skipped
 
-    def enroll_from_stream(self, name):
+    def enroll_from_stream(self, name, region=None):
         """Capture the current frame and add it as a sample for that person.
         If several faces are visible (e.g. the avatar is on the stream too):
         already-enrolled faces are skipped, a face that already matches the
         enrollment name is preferred, and among remaining new faces the most
-        confident detection wins (real faces out-score stylized/drawn ones)."""
+        confident detection wins (real faces out-score stylized/drawn ones).
+        Optional region [x0, y0, x1, y1] (fractions 0-1 of the frame, from the
+        GUI's drag-selection) restricts enrollment to faces inside that box."""
         if not name or not name.strip():
             raise ValueError("No name provided")
         name = name.strip()
         frame_bgr = self._current_bgr()
         if frame_bgr is None:
             raise ValueError("No frame available from the vision source")
-        frame, faces = self._detect_faces(frame_bgr)
+        if region is not None:
+            # Explicit user selection (GUI drag box): the region IS the user's
+            # guarantee — bypass the strict width/confidence heuristics and let
+            # the box decide what gets enrolled (tiny or stylized faces included)
+            frame, faces = self._detect_faces(frame_bgr, min_width=15, detection_threshold=0.05)
+        else:
+            frame, faces = self._detect_faces(frame_bgr)
         if len(faces) == 0:
-            raise ValueError("No face detected in the current frame")
+            raise ValueError("No face detected — the face may be too stylized for the "
+                             "detector. Click 'Scan Now' (Deep scan shows its real score); "
+                             "or drop a clear screenshot into models/faces/photos/ and "
+                             "click Refresh List")
+
+        # Restrict to the selected area, if one was given (normalized coords)
+        if region is not None:
+            try:
+                rx0, ry0, rx1, ry1 = (float(v) for v in region[:4])
+            except Exception:
+                raise ValueError("Invalid region")
+            if not all(0.0 <= v <= 1.0 for v in (rx0, ry0, rx1, ry1)):
+                raise ValueError("Region must be fractions between 0 and 1")
+            fh, fw = frame.shape[:2]
+            px0, px1 = min(rx0, rx1) * fw, max(rx0, rx1) * fw
+            py0, py1 = min(ry0, ry1) * fh, max(ry0, ry1) * fh
+            inside = []
+            for face in faces:
+                cx = float(face[0]) + float(face[2]) / 2.0
+                cy = float(face[1]) + float(face[3]) / 2.0
+                if px0 <= cx <= px1 and py0 <= cy <= py1:
+                    inside.append(face)
+            if not inside:
+                raise ValueError("No face found inside the selected area")
+            if len(inside) < len(faces):
+                print(f"FACES INFO: enrollment restricted to the selected area "
+                      f"({len(inside)} of {len(faces)} face(s))")
+            faces = inside
 
         target_face = None   # the face to enroll
         unknowns = []
@@ -491,23 +535,42 @@ class FaceRecognizer:
             return None
         return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
-    def _detect_faces(self, bgr):
+    def _detect_faces(self, bgr, min_width=None, detection_threshold=None):
         """Downscale large frames for speed, run YuNet.
         Returns (frame_used, faces) — face rows are aligned to frame_used, so
-        pass frame_used (not the original) to alignCrop/feature."""
+        pass frame_used (not the original) to alignCrop/feature.
+        Optional min_width / detection_threshold override the configured values
+        for this call only (used when the user explicitly selects a region)."""
         h, w = bgr.shape[:2]
         scale = 960.0 / float(max(w, h))
         frame = cv2.resize(bgr, (int(w * scale), int(h * scale)),
                            interpolation=cv2.INTER_AREA) if scale < 1.0 else bgr
         fh, fw = frame.shape[:2]
         self.detector.setInputSize((fw, fh))
-        _, faces = self.detector.detect(frame)
-        return frame, [] if faces is None else faces
+        saved_threshold = None
+        if detection_threshold is not None and hasattr(self.detector, 'setScoreThreshold'):
+            saved_threshold = self.detection_threshold
+            self.detector.setScoreThreshold(float(detection_threshold))
+        try:
+            _, faces = self.detector.detect(frame)
+        finally:
+            if saved_threshold is not None and hasattr(self.detector, 'setScoreThreshold'):
+                self.detector.setScoreThreshold(saved_threshold)
+        if faces is None:
+            return frame, []
+        # Width filter: chat avatars, emojis and UI noise produce tiny "faces"
+        # (often 5-20px) that cross-match enrolled avatars — ignore anything
+        # narrower than min_width_px (per-call override supported)
+        width_floor = self.min_width_px if min_width is None else min_width
+        if width_floor > 0:
+            faces = [f for f in faces if float(f[2]) >= width_floor]
+        return frame, faces
 
     def _match_face(self, frame, face):
         """Match one detected face row against enrolled people's samples
         (best score across all of each person's samples wins).
-        Returns {'name', 'known', 'confidence'} (unmatched -> 'unknown')."""
+        Returns {'name', 'known', 'confidence', 'detection'} — 'detection' is the
+        YuNet detector confidence, useful for tuning VISION_FACE_DETECTION_THRESHOLD."""
         feat = self.recognizer.feature(self.recognizer.alignCrop(frame, face))
         with self.lock:
             enrolled = dict(self.enrolled)
@@ -517,9 +580,19 @@ class FaceRecognizer:
                 score = float(self.recognizer.match(feat, ref, cv2.FaceRecognizerSF_FR_COSINE))
                 if score > best_score:
                     best_name, best_score = name, score
+        try:
+            det = float(face[-1])  # YuNet detection confidence (last row column)
+        except Exception:
+            det = 0.0
+        try:
+            w = int(float(face[2]))  # face box width in pixels (UI filtering)
+        except Exception:
+            w = 0
         if best_name is not None and best_score >= self.match_threshold:
-            return {'name': best_name, 'known': True, 'confidence': round(best_score, 3)}
-        return {'name': 'unknown', 'known': False, 'confidence': round(best_score, 3)}
+            return {'name': best_name, 'known': True, 'confidence': round(best_score, 3),
+                    'detection': round(det, 3), 'width': w}
+        return {'name': 'unknown', 'known': False, 'confidence': round(best_score, 3),
+                'detection': round(det, 3), 'width': w}
 
     def recognize(self, bgr):
         """Detect faces and match them against enrolled people's samples.
@@ -693,35 +766,54 @@ def faces_current():
 
 @vision_app.route('/faces/scan', methods=['POST'])
 def faces_scan():
-    """One-shot recognition pass on the current frame (debug / GUI)."""
+    """One-shot recognition pass on the current frame (debug / GUI).
+    Optional ?threshold=X temporarily overrides the YuNet detection cutoff
+    for this scan only — used to find what score a hard-to-detect face
+    (e.g. a VTuber avatar) actually gets."""
     if face_recognizer is None:
         return jsonify({"error": "Face recognition is not enabled"}), 503
     bgr = face_recognizer._current_bgr()
     if bgr is None:
         return jsonify({"error": "Could not capture frame"}), 500
-    return jsonify({"faces": face_recognizer.recognize(bgr)})
+    override = request.args.get('threshold', type=float)
+    detector = face_recognizer.detector
+    if override is not None and hasattr(detector, 'setScoreThreshold'):
+        try:
+            detector.setScoreThreshold(float(override))
+            faces = face_recognizer.recognize(bgr)
+        finally:
+            detector.setScoreThreshold(face_recognizer.detection_threshold)
+    else:
+        faces = face_recognizer.recognize(bgr)
+    return jsonify({"faces": faces})
 
 @vision_app.route('/faces/list', methods=['GET'])
 def faces_list():
-    """List enrolled people."""
+    """List enrolled people, with how many samples each has stored
+    (samples accumulate — adding more never removes the old ones)."""
     if face_recognizer is None:
         return jsonify({"error": "Face recognition is not enabled"}), 503
     with face_recognizer.lock:
-        names = sorted(face_recognizer.enrolled.keys())
-    return jsonify({"people": names, "count": len(names)})
+        people = [{"name": n, "samples": len(s)}
+                  for n, s in sorted(face_recognizer.enrolled.items())]
+    return jsonify({"people": people, "count": len(people)})
 
 @vision_app.route('/faces/enroll', methods=['POST'])
 def faces_enroll():
-    """Enroll a person from the current frame: {'name': 'jaygee'}.
-    Requires exactly one face on screen. Re-enrolling averages samples."""
+    """Enroll a person from the current frame: {'name': 'jaygee', 'region':
+    [x0, y0, x1, y1]} — optional region (fractions 0-1, from the GUI's
+    drag-selection) restricts enrollment to faces inside that box."""
     if face_recognizer is None:
         return jsonify({"error": "Face recognition is not enabled"}), 503
     data = request.get_json(silent=True) or {}
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({"error": "No name provided"}), 400
+    region = data.get('region')
+    if region is not None and (not isinstance(region, (list, tuple)) or len(region) != 4):
+        return jsonify({"error": "Invalid region"}), 400
     try:
-        face_recognizer.enroll_from_stream(name)
+        face_recognizer.enroll_from_stream(name, region=region)
         print(f"FACES INFO: enrolled '{name}' from live capture")
         return jsonify({"status": "ok", "name": name})
     except ValueError as e:
@@ -855,6 +947,8 @@ if __name__ == '__main__':
                 report_unknown=config.get('face_report_unknown', True),
                 event_url=config.get('face_event_url'),
                 ignore_names=config.get('face_ignore_names', []),
+                detection_threshold=config.get('face_detection_threshold', 0.6),
+                min_width_px=config.get('face_min_width_px', 30),
             )
             face_recognizer.start()
         except IOError as e:
