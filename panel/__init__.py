@@ -1,0 +1,1 @@
+"""NiceGUI control panel package for Gem-System v2 (replaces tkinter gui.py incrementally)."""

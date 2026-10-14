@@ -17,6 +17,7 @@ from quart import Quart, request, jsonify
 from quart_cors import cors
 
 import config
+from config_writer import write_config_values
 from clients import LLMClient, SSNClient, CogneeClient, TTSClient, MusicClient, OpenCodeClient, VisionClient, WeatherClient
 from clients.twitch_client import TwitchClient
 from clients.audio_player import AudioPlayer
@@ -485,12 +486,9 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.py")
 
 
 def save_config():
-    """Write current runtime settings back to config.py (single source of truth)."""
-    import re
+    """Write current runtime settings back to config.py (single source of truth).
+    The regex machinery lives in config_writer.py (shared with the NiceGUI panel)."""
     try:
-        with open(CONFIG_FILE, "r") as f:
-            content = f.read()
-
         # Map of setting name -> (value, is_string)
         settings = {
             'TTS_ENGINE': (config.TTS_ENGINE, True),
@@ -605,73 +603,18 @@ def save_config():
             'OLLAMA_MODEL': (config.OLLAMA_MODEL, True),
         }
 
-        for key, (value, is_string) in settings.items():
-            if is_string:
-                new_value = repr(str(value))
-            else:
-                new_value = str(value)
-            # Replace the assignment line (function replacement avoids escape interpretation)
-            pattern = re.compile(rf'^{key}\s*=\s*.*$', re.MULTILINE)
-            content = pattern.sub(lambda m, kv=f'{key} = {new_value}': kv, content)
+        # Multiline / structured values, handled by the shared writer
+        special = {
+            'SYSTEM_PROMPT': config.SYSTEM_PROMPT,
+            'GAME_AGENT_SYSTEM_PROMPT': config.GAME_AGENT_SYSTEM_PROMPT,
+            'OSC_ACTIONS': config.OSC_ACTIONS,
+            'LAYA_ANIMATION_MAP': config.LAYA_ANIMATION_MAP,
+            'LAYA_ANIMATION_OPTIONS': config.LAYA_ANIMATION_OPTIONS,
+            'BROWSER_BLOCKED_TERMS': config.BROWSER_BLOCKED_TERMS,
+        }
 
-        # Persist SYSTEM_PROMPT (multiline triple-quoted string, handled separately)
-        # Use a function replacement so backslashes in the value aren't interpreted as escapes.
-        prompt_literal = repr(config.SYSTEM_PROMPT)
-        prompt_pattern = re.compile(r'^SYSTEM_PROMPT\s*=\s*""".*?"""\s*$', re.MULTILINE | re.DOTALL)
-        if prompt_pattern.search(content):
-            content = prompt_pattern.sub(lambda m: f'SYSTEM_PROMPT = {prompt_literal}', content)
-        else:
-            content += f'\nSYSTEM_PROMPT = {prompt_literal}\n'
-
-        # Persist GAME_AGENT_SYSTEM_PROMPT (multiline, handled separately).
-        # Match both parenthesized and plain (single-line) definitions, up to the
-        # closing paren or end-of-line, so a rewrite never leaves an orphan.
-        game_prompt_literal = repr(config.GAME_AGENT_SYSTEM_PROMPT)
-        game_prompt_pattern = re.compile(
-            r'^GAME_AGENT_SYSTEM_PROMPT\s*=\s*(?:\([^\n]*\n(?:.*\n)*?\)|.*?)(?=\n#|\n[A-Z_]+|\Z)',
-            re.MULTILINE
-        )
-        if game_prompt_pattern.search(content):
-            content = game_prompt_pattern.sub(lambda m: f'GAME_AGENT_SYSTEM_PROMPT = {game_prompt_literal}', content)
-        else:
-            content += f'\nGAME_AGENT_SYSTEM_PROMPT = {game_prompt_literal}\n'
-
-        # Persist OSC_ACTIONS (a list of dicts, handled separately)
-        import pprint
-        actions_literal = pprint.pformat(config.OSC_ACTIONS, width=120)
-        osc_pattern = re.compile(r'^OSC_ACTIONS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
-        if osc_pattern.search(content):
-            content = osc_pattern.sub(f'OSC_ACTIONS = {actions_literal}', content)
-        else:
-            content += f'\nOSC_ACTIONS = {actions_literal}\n'
-
-        # Persist LAYA_ANIMATION_MAP (a list of dicts, handled separately)
-        laya_map_literal = pprint.pformat(config.LAYA_ANIMATION_MAP, width=120)
-        laya_pattern = re.compile(r'^LAYA_ANIMATION_MAP\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
-        if laya_pattern.search(content):
-            content = laya_pattern.sub(f'LAYA_ANIMATION_MAP = {laya_map_literal}', content)
-        else:
-            content += f'\nLAYA_ANIMATION_MAP = {laya_map_literal}\n'
-
-        # Persist LAYA_ANIMATION_OPTIONS (a list of strings, handled separately)
-        options_literal = pprint.pformat(config.LAYA_ANIMATION_OPTIONS, width=120)
-        options_pattern = re.compile(r'^LAYA_ANIMATION_OPTIONS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
-        if options_pattern.search(content):
-            content = options_pattern.sub(f'LAYA_ANIMATION_OPTIONS = {options_literal}', content)
-        else:
-            content += f'\nLAYA_ANIMATION_OPTIONS = {options_literal}\n'
-
-        # Persist BROWSER_BLOCKED_TERMS (a list of strings, handled separately)
-        blocked_literal = pprint.pformat(config.BROWSER_BLOCKED_TERMS, width=120)
-        blocked_pattern = re.compile(r'^BROWSER_BLOCKED_TERMS\s*=\s*\[.*?\]\s*$', re.MULTILINE | re.DOTALL)
-        if blocked_pattern.search(content):
-            content = blocked_pattern.sub(f'BROWSER_BLOCKED_TERMS = {blocked_literal}', content)
-        else:
-            content += f'\nBROWSER_BLOCKED_TERMS = {blocked_literal}\n'
-
-        with open(CONFIG_FILE, "w") as f:
-            f.write(content)
-        print("✓ Settings written to config.py")
+        if write_config_values(CONFIG_FILE, settings, special):
+            print("✓ Settings written to config.py")
     except Exception as e:
         print(f"Failed to save config.py: {e}")
 
@@ -2143,6 +2086,16 @@ async def api_update_settings():
     if 'vision_face_min_width_px' in data:
         try:
             config.VISION_FACE_MIN_WIDTH_PX = int(data['vision_face_min_width_px'])
+        except (TypeError, ValueError):
+            pass
+    if 'vision_face_match_threshold' in data:
+        try:
+            config.VISION_FACE_MATCH_THRESHOLD = float(data['vision_face_match_threshold'])
+        except (TypeError, ValueError):
+            pass
+    if 'vision_face_absence_reset_s' in data:
+        try:
+            config.VISION_FACE_ABSENCE_RESET_S = float(data['vision_face_absence_reset_s'])
         except (TypeError, ValueError):
             pass
     if 'browser_enabled' in data:

@@ -148,8 +148,26 @@ class CameraStream:
 
     def release(self):
         self.stopped = True
-        if self.thread.is_alive(): self.thread.join()
+        if self.thread.is_alive(): self.thread.join(timeout=3)
         self.cap.release()
+
+
+# Module-level NDI runtime management: the NDI runtime is process-global.
+# Initializing it per stream and destroying it on release wedges every other
+# live receiver in the process (a camera-stream restart would freeze the new
+# stream). So: initialize once, never destroy until the process exits.
+_NDI_RUNTIME_INITIALIZED = False
+
+
+def _ensure_ndi_runtime():
+    global _NDI_RUNTIME_INITIALIZED
+    if not NDI_AVAILABLE:
+        return False
+    if not _NDI_RUNTIME_INITIALIZED:
+        if not ndi.initialize():
+            return False
+        _NDI_RUNTIME_INITIALIZED = True
+    return True
 
 
 class NDIStream:
@@ -157,8 +175,8 @@ class NDIStream:
     def __init__(self, source_name=None):
         if not NDI_AVAILABLE:
             raise IOError("NDIlib not installed. Run: pip install ndi-python")
-        
-        if not ndi.initialize():
+
+        if not _ensure_ndi_runtime():
             raise IOError("Cannot initialize NDI runtime")
         
         self.ndi_find = ndi.find_create_v2()
@@ -228,10 +246,13 @@ class NDIStream:
     def release(self):
         self.stopped = True
         if self.thread.is_alive():
-            self.thread.join()
+            self.thread.join(timeout=3)
+            if self.thread.is_alive():
+                print("NDI WARN: capture thread did not stop in time; exiting anyway")
         ndi.recv_destroy(self.ndi_recv)
         ndi.find_destroy(self.ndi_find)
-        ndi.destroy()
+        # NOTE: no ndi.destroy() here — the NDI runtime is process-global
+        # (see _ensure_ndi_runtime); destroying it would wedge other receivers
 
 def encode_image_to_base64(image: Image.Image) -> str:
     """Encodes a PIL Image into a Base64 string for JSON transport."""
@@ -836,18 +857,141 @@ def faces_delete(name):
     return jsonify({"status": "ok" if removed else "not_found"})
 
 
+@vision_app.route('/health', methods=['GET'])
+def health():
+    """Service liveness + basic state (for the control panel's status polling)."""
+    return jsonify({
+        'status': 'ok',
+        'image_source': config.get('image_source', 'cam'),
+        'ndi_source_name': config.get('ndi_source_name', ''),
+        'face_recognition': face_recognizer is not None,
+        'enrolled': len(face_recognizer.enrolled) if face_recognizer is not None else 0,
+    })
+
+
+@vision_app.route('/settings', methods=['POST'])
+def update_settings():
+    """Live-apply vision settings pushed by the control panel (the panel writes
+    config.py itself; this endpoint updates the RUNNING service without a
+    restart). Camera source changes restart the stream in place."""
+    global camera_stream, face_recognizer
+    data = request.get_json(silent=True) or {}
+    applied, restarted = [], []
+
+    # Simple values (config dict is read per-request / per-scan, instant effect)
+    simple_keys = {
+        'frame_max_edge': int,
+        'face_scan_interval_s': float,
+        'face_match_threshold': float,
+        'face_min_width_px': int,
+        'face_detection_threshold': float,
+        'face_absence_reset_s': float,
+        'face_report_unknown': bool,
+    }
+    for key, cast in simple_keys.items():
+        if key in data:
+            try:
+                config[key] = cast(data[key])
+                applied.append(key)
+            except (TypeError, ValueError):
+                pass
+
+    if 'face_ignore_names' in data and isinstance(data['face_ignore_names'], list):
+        config['face_ignore_names'] = [str(n).strip().lower()
+                                        for n in data['face_ignore_names'] if str(n).strip()]
+        applied.append('face_ignore_names')
+
+    # Live recognizer attribute updates
+    if face_recognizer is not None:
+        r = face_recognizer
+        if 'face_match_threshold' in applied:
+            r.match_threshold = float(config['face_match_threshold'])
+        if 'face_min_width_px' in applied:
+            r.min_width_px = int(config['face_min_width_px'])
+        if 'face_detection_threshold' in applied and hasattr(r.detector, 'setScoreThreshold'):
+            r.detection_threshold = float(config['face_detection_threshold'])
+            r.detector.setScoreThreshold(r.detection_threshold)
+        if 'face_scan_interval_s' in applied:
+            r.scan_interval_s = float(config['face_scan_interval_s'])
+        if 'face_absence_reset_s' in applied:
+            r.absence_reset_s = float(config['face_absence_reset_s'])
+        if 'face_report_unknown' in applied:
+            r.report_unknown = bool(config['face_report_unknown'])
+        if 'face_ignore_names' in applied:
+            r.ignore_names = set(config['face_ignore_names'])
+
+    # Recognition enable/disable (scan thread start/stop)
+    if 'face_recognition_enabled' in data:
+        enabled = bool(data['face_recognition_enabled'])
+        config['face_recognition_enabled'] = enabled
+        applied.append('face_recognition_enabled')
+        if enabled and face_recognizer is None and camera_stream is not None:
+            try:
+                face_recognizer = FaceRecognizer(
+                    face_dir=config.get('face_dir', 'models/faces'),
+                    camera_stream=camera_stream,
+                    match_threshold=config.get('face_match_threshold', 0.363),
+                    scan_interval_s=config.get('face_scan_interval_s', 5.0),
+                    absence_reset_s=config.get('face_absence_reset_s', 120.0),
+                    report_unknown=config.get('face_report_unknown', True),
+                    event_url=config.get('face_event_url'),
+                    ignore_names=config.get('face_ignore_names', []),
+                    detection_threshold=config.get('face_detection_threshold', 0.6),
+                    min_width_px=config.get('face_min_width_px', 30),
+                )
+                face_recognizer.start()
+                print("FACES INFO: recognition enabled live")
+            except IOError as e:
+                print(f"FACES WARN: could not enable recognition: {e}")
+                face_recognizer = None
+        elif not enabled and face_recognizer is not None:
+            face_recognizer.stop()
+            face_recognizer = None
+            print("FACES INFO: recognition disabled live")
+
+    # Camera source changes -> restart the stream in place
+    source_keys = ['image_source', 'camera_index', 'ndi_source_name']
+    if any(k in data for k in source_keys):
+        for k in source_keys:
+            if k in data:
+                config[k] = data[k]
+                applied.append(k)
+        try:
+            # Release the OLD stream FIRST — with the process-global NDI
+            # runtime kept alive, creating the replacement first and releasing
+            # second is also safe, but a clean teardown avoids two receivers
+            # competing for frames during the swap.
+            old = camera_stream
+            if old is not None:
+                old.release()
+                camera_stream = None
+            time.sleep(0.5)
+            image_source = config.get('image_source', 'cam')
+            if image_source == 'ndi':
+                camera_stream = NDIStream(source_name=config.get('ndi_source_name'))
+            else:
+                camera_stream = CameraStream(camera_index=config.get('camera_index', 0),
+                                              image_source=image_source)
+            restarted.append('camera_stream')
+            print(f"VISION INFO: camera stream restarted live (source: {image_source})")
+            if face_recognizer is not None:
+                face_recognizer.camera_stream = camera_stream
+        except Exception as e:
+            return jsonify({'error': f'Failed to restart camera stream: {e}'}), 500
+
+    return jsonify({'status': 'ok', 'applied': applied, 'restarted': restarted})
+
+
 @vision_app.route('/ndi/sources', methods=['GET'])
 def ndi_sources():
     """List NDI sources currently visible on the network (for the GUI dropdown).
-    If an NDIStream is already running, it owns the NDI runtime and we only
-    borrow it; otherwise this endpoint initializes/destroys NDI itself."""
+    The NDI runtime is process-global (_ensure_ndi_runtime) — this endpoint
+    borrows it and never destroys it."""
     if not NDI_AVAILABLE:
         return jsonify({"error": "NDIlib not installed. Run: pip install ndi-python"}), 503
 
-    owns_runtime = not isinstance(camera_stream, NDIStream)
-    if owns_runtime:
-        if not ndi.initialize():
-            return jsonify({"error": "Cannot initialize NDI runtime"}), 500
+    if not _ensure_ndi_runtime():
+        return jsonify({"error": "Cannot initialize NDI runtime"}), 500
     finder = None
     try:
         finder = ndi.find_create_v2()
@@ -863,8 +1007,6 @@ def ndi_sources():
     finally:
         if finder is not None:
             ndi.find_destroy(finder)
-        if owns_runtime:
-            ndi.destroy()
 
 def run_vision_server():
     host = "127.0.0.1"; port = 5001
@@ -958,6 +1100,28 @@ if __name__ == '__main__':
     server_thread = threading.Thread(target=run_vision_server, daemon=True)
     server_thread.start()
 
+    def _vision_shutdown(signum=None, frame=None):
+        """Guaranteed shutdown: bounded cleanup then a hard exit — Ctrl+C can
+        never wedge the process (all joins are time-limited, os._exit is final)."""
+        print("\nVISION INFO: Shutting down...")
+        try:
+            if face_recognizer is not None:
+                face_recognizer.stop()
+        except Exception:
+            pass
+        try:
+            if camera_stream:
+                camera_stream.release()
+        except Exception:
+            pass
+        print("VISION INFO: Script has shut down.")
+        os._exit(0)
+
+    # Ctrl+C (SIGINT) and Ctrl+Break (SIGBREAK) both trigger the clean shutdown
+    import signal
+    signal.signal(signal.SIGINT, _vision_shutdown)
+    signal.signal(signal.SIGBREAK, _vision_shutdown)
+
     if config.get('enable_local_vlm', False):
         user_input_loop()
     else:
@@ -966,11 +1130,5 @@ if __name__ == '__main__':
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\nVISION INFO: Ctrl+C detected. Shutting down...")
-    
-    if camera_stream:
-        camera_stream.release()
-    if face_recognizer is not None:
-        face_recognizer.stop()
-    print("VISION INFO: Script has shut down.")
-    os._exit(0)
+    _vision_shutdown()
 # ------------------------------------------------------------------------------

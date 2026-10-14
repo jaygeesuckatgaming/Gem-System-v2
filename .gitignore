@@ -68,6 +68,9 @@ now_playing_state.txt
 current_pose.txt
 token_usage_state.json
 
+# Control panel debug log
+panel_launch.log
+
 # Browser-use session dumps (regenerated each task)
 session-*.md
 

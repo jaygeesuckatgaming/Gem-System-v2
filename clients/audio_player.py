@@ -31,30 +31,17 @@ class AudioPlayer:
 
         The stored value may be in '[ID] Name' format (from sounddevice).
         SDL's get_audio_device_names returns names WITHOUT the '[ID]' prefix,
-        so we must resolve the ID to the full name first.
+        so we must resolve to the full name. Uses the shared name-verified
+        resolver: Windows shifts device indices between boots, so the stored
+        ID is only trusted when the name at that index still matches.
         """
         if not self.device_name:
             return None
 
         try:
-            import sounddevice as sd
-            devices = sd.query_devices()
-
-            # Case 1: '[ID] Name' format -> resolve ID to full name
-            if ']' in self.device_name:
-                device_id = int(self.device_name.split(']')[0].strip('['))
-                for dev in devices:
-                    if dev['index'] == device_id and dev['max_output_channels'] > 0:
-                        return dev['name']
-                # ID not found, fall back to partial name
-                name_partial = self.device_name.split('] ', 1)[1]
-                for dev in devices:
-                    if dev['name'].startswith(name_partial[:20]) and dev['max_output_channels'] > 0:
-                        return dev['name']
-                return None
-
-            # Case 2: plain name -> use as-is
-            return self.device_name
+            from device_utils import resolve_device
+            dev = resolve_device(self.device_name, want_input=False)
+            return dev['name'] if dev else None
         except Exception as e:
             print(f"AudioPlayer: Device resolution error: {e}")
             return self.device_name

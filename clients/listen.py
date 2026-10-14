@@ -79,21 +79,17 @@ def load_settings_from_ini():
         
         print(f"AUDIO INFO: Found saved input device -> '{device_string}'")
 
-        # Parse the device ID from the string format "[ID] Device Name"
-        if not device_string.startswith('[') or ']' not in device_string:
-            raise ValueError(f"The device string '{device_string}' is not in the expected format '[ID] Name'.")
-        
-        device_id_str = device_string.split(']')[0][1:]
-        settings['device_id'] = int(device_id_str)
+        # --- Device Validation (name-verified) ---
+        # Windows shifts audio device indices between boots, so the stored ID is
+        # only trusted when the name at that index still matches — otherwise the
+        # device is found by name.
+        from device_utils import resolve_device, device_to_option
+        dev = resolve_device(device_string, want_input=True)
+        if dev is None:
+            raise ValueError(f"Saved input device ('{device_string}') is not available on this system.")
+        settings['device_id'] = dev['index']
 
-        # --- Device Validation (Crucial!) ---
-        # Verify that the saved device ID is actually available on this machine
-        devices = sd.query_devices()
-        input_device_ids = [d['index'] for d in devices if d['max_input_channels'] > 0]
-        if settings['device_id'] not in input_device_ids:
-            raise ValueError(f"Saved device ID {settings['device_id']} ('{device_string}') is not a valid input device on this system.")
-        
-        print(f"AUDIO INFO: Successfully parsed and validated device ID -> {settings['device_id']}")
+        print(f"AUDIO INFO: Using input device -> '{device_to_option(dev)}' (id {dev['index']})")
 
     except ValueError as e:
         sys.exit(f"FATAL ERROR: Problem with the audio device setting. Details: {e}")

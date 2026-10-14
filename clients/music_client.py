@@ -202,47 +202,26 @@ class MusicClient:
         return True
 
     def _resolve_device_name(self, device_string: str) -> Optional[str]:
-        """Resolve a '[ID] Name' or plain device string to an SDL-compatible name."""
+        """Resolve a '[ID] Name' or plain device string to an SDL-compatible
+        name. Name-verified via device_utils (indices shift between boots)."""
         try:
-            import sounddevice as sd
-            devices = sd.query_devices()
-            if ']' in device_string:
-                device_id = int(device_string.split(']')[0].strip('['))
-                for dev in devices:
-                    if dev['index'] == device_id and dev['max_output_channels'] > 0:
-                        return dev['name']
-                name_partial = device_string.split('] ', 1)[1]
-                for dev in devices:
-                    if dev['name'].startswith(name_partial[:20]) and dev['max_output_channels'] > 0:
-                        return dev['name']
-                return None
-            return device_string
+            from device_utils import resolve_device
+            dev = resolve_device(device_string, want_input=False)
+            return dev['name'] if dev else None
         except Exception as e:
             print(f"Music device resolution error: {e}")
             return device_string
 
     def _get_music_device_id(self):
         """Resolve the music output device to a sounddevice device index.
-        Returns None to use the system default."""
+        Name-verified (indices shift between boots). Returns None for default."""
         music_device = self.music_device_name or self.device_name
         if not music_device:
             return None
         try:
-            devices = sd.query_devices()
-            if ']' in music_device:
-                device_id = int(music_device.split(']')[0].strip('['))
-                for dev in devices:
-                    if dev['index'] == device_id and dev['max_output_channels'] > 0:
-                        return dev['index']
-                return None
-            # Plain name -> match by name
-            for dev in devices:
-                if dev['name'] == music_device and dev['max_output_channels'] > 0:
-                    return dev['index']
-            for dev in devices:
-                if music_device in dev['name'] and dev['max_output_channels'] > 0:
-                    return dev['index']
-            return None
+            from device_utils import resolve_device
+            dev = resolve_device(music_device, want_input=False)
+            return dev['index'] if dev else None
         except Exception as e:
             print(f"Music device resolution error: {e}")
             return None

@@ -1,0 +1,1 @@
+"""Control panel tabs — one module per tab as they migrate from gui.py."""
