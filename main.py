@@ -40,6 +40,10 @@ def _tts_url_for_engine():
         return config.VIBEVOICE_TTS_URL
     if config.TTS_ENGINE == "qwen":
         return config.QWEN_TTS_URL
+    if config.TTS_ENGINE == "ming":
+        return config.MING_TTS_URL
+    if config.TTS_ENGINE == "audio8":
+        return config.AUDIO8_TTS_URL
     return config.TTS_URL
 
 tts = TTSClient(tts_url=_tts_url_for_engine())
@@ -135,6 +139,32 @@ idle = IdleManager(
     osc_idle_value=config.IDLE_OSC_IDLE_VALUE,
     topics=config.IDLE_TOPICS,
 )
+
+# Don't ramble while Gem Drive is actually running. GAME_DRIVE_ENABLED is
+# toggled live, but idle should only be suppressed when the game process is
+# reachable — not merely when the flag is on.
+async def _idle_game_suppressed() -> bool:
+    if not getattr(config, 'GAME_DRIVE_SUPPRESS_IDLE', True):
+        return False
+    if not getattr(config, 'GAME_DRIVE_ENABLED', False):
+        return False
+    host = getattr(config, 'GAME_DRIVE_HOST', '127.0.0.1')
+    port = int(getattr(config, 'GAME_DRIVE_PORT', 5010))
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=0.4
+        )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+idle.should_suppress = _idle_game_suppressed
+
 def _idle_send_osc(address: str, value: str):
     # Only send OSC if a value is actually set (empty = skip, to avoid sending
     # blank commands that break other animations).
@@ -434,6 +464,7 @@ _last_ai_responses = deque(maxlen=10)
 
 # Pause flag: when True, the MCP ignores incoming chat (acts as a mute/standby)
 _paused = False
+_last_chat = {'speaker': None, 'message': None, 'source': 'unknown', 'time': 0.0}
 
 # Current avatar pose (base is "sitting"). The LLM can change this via [ACTION: x] tags.
 current_pose = config.AVATAR_BASE_POSE
@@ -498,6 +529,8 @@ def save_config():
             'POCKET_TTS_URL': (config.POCKET_TTS_URL, True),
             'VIBEVOICE_TTS_URL': (config.VIBEVOICE_TTS_URL, True),
             'QWEN_TTS_URL': (config.QWEN_TTS_URL, True),
+            'MING_TTS_URL': (config.MING_TTS_URL, True),
+            'AUDIO8_TTS_URL': (config.AUDIO8_TTS_URL, True),
             'VIBEVOICE_MODEL': (config.VIBEVOICE_MODEL, True),
             'VIBEVOICE_INFERENCE_STEPS': (config.VIBEVOICE_INFERENCE_STEPS, False),
             'TTS_DIFFUSION_STEPS': (config.TTS_DIFFUSION_STEPS, False),
@@ -534,6 +567,9 @@ def save_config():
             'OSC_IP': (config.OSC_IP, True),
             'OSC_PORT': (config.OSC_PORT, False),
             'OSC_ADDRESS': (config.OSC_ADDRESS, True),
+            'ISO_GAME_ENABLED': (config.ISO_GAME_ENABLED, False),
+            'ISO_OSC_IP': (config.ISO_OSC_IP, True),
+            'ISO_OSC_PORT': (config.ISO_OSC_PORT, False),
             'IDLE_ACTIONS_ENABLED': (config.IDLE_ACTIONS_ENABLED, False),
             'IDLE_INACTIVITY_LIMIT': (config.IDLE_INACTIVITY_LIMIT, False),
             'IDLE_COOLDOWN': (config.IDLE_COOLDOWN, False),
@@ -608,6 +644,9 @@ def save_config():
             'SYSTEM_PROMPT': config.SYSTEM_PROMPT,
             'GAME_AGENT_SYSTEM_PROMPT': config.GAME_AGENT_SYSTEM_PROMPT,
             'OSC_ACTIONS': config.OSC_ACTIONS,
+            'ISO_OSC_ACTIONS': config.ISO_OSC_ACTIONS,
+            'IDLE_TOPICS': config.IDLE_TOPICS,
+            'IDLE_MONOLOGUE_PROMPT': config.IDLE_MONOLOGUE_PROMPT,
             'LAYA_ANIMATION_MAP': config.LAYA_ANIMATION_MAP,
             'LAYA_ANIMATION_OPTIONS': config.LAYA_ANIMATION_OPTIONS,
             'BROWSER_BLOCKED_TERMS': config.BROWSER_BLOCKED_TERMS,
@@ -724,6 +763,63 @@ def extract_opencode_command(text: str):
             if command:
                 return command
     
+    return None
+
+
+GAME_COMMAND_ALIASES = {
+    "l": "left",
+    "r": "right",
+    "f": "faster",
+    "s": "slower",
+    "b": "brake",
+    "j": "join",
+    "q": "leave",
+    "sc": "score",
+    "g": "faster",
+    "gas": "faster",
+    "accelerate": "faster",
+    "speedup": "faster",
+    "slow": "slower",
+    "stop": "brake",
+    "quit": "leave",
+    "stats": "score",
+    "leaderboard": "score",
+}
+
+
+def extract_game_command(message: str) -> Optional[str]:
+    """Extract a !command for the chat-driven driving game (Gem Drive).
+
+    Game commands deliberately bypass the wake-word gate: viewers type short
+    commands like "!left". They are only recognized when GAME_DRIVE_ENABLED is
+    on and the command is in the configured allowlist, so ordinary chat is
+    never swallowed.
+    """
+    if not getattr(config, 'GAME_DRIVE_ENABLED', False):
+        return None
+    match = re.search(r'(?:^|\s)!([a-zA-Z]+)\b', message)
+    if not match:
+        return None
+    command = match.group(1).lower()
+    command = GAME_COMMAND_ALIASES.get(command, command)
+    allowed = {
+        str(item).lower().lstrip('!')
+        for item in getattr(config, 'GAME_DRIVE_COMMANDS', [])
+    }
+    return command if command in allowed else None
+
+
+def extract_iso_osc_action(message: str):
+    """Exact-match chat phrase -> Isometric Unreal OSC action."""
+    if not getattr(config, 'ISO_GAME_ENABLED', False):
+        return None
+    text = (message or '').strip().lower().lstrip('!').strip()
+    if not text:
+        return None
+    for action in getattr(config, 'ISO_OSC_ACTIONS', []) or []:
+        phrase = str(action.get('phrase', '')).strip().lower().lstrip('!').strip()
+        if phrase and text == phrase:
+            return action
     return None
 
 
@@ -1091,27 +1187,53 @@ async def handle_incoming_message(data: dict):
     message = re.sub(r'\bjim\b', 'Gem', message, flags=re.IGNORECASE)
 
     print(f"\n[CHAT] {speaker}: {message}")
-    
-    # Track known speakers (for nickname resolution)
-    if speaker and speaker != 'Unknown' and speaker not in _known_speakers:
+
+    # Our own bot name(s) — normally blocked to prevent self-triggering, but
+    # explicit Isometric game phrases are allowed through (Gem plays the game).
+    is_own_bot = speaker.lower() in ('gem', 'gem_chadee', 'gem-chadee')
+
+    # Track known speakers (for nickname resolution; never register our own bot)
+    if not is_own_bot and speaker and speaker != 'Unknown' and speaker not in _known_speakers:
         _known_speakers.add(speaker)
         save_known_speakers()
-    
+
+    # Isometric Unreal game: exact phrase -> OSC (no wake word, no LLM).
+    # Checked BEFORE the own-bot guard and the Gem Drive hook so an explicitly
+    # configured ISO phrase (e.g. "!join") always wins.
+    iso_action = extract_iso_osc_action(message)
+    if iso_action:
+        address = str(iso_action.get('address', '') or '')
+        value = str(iso_action.get('value', '') or '')
+        # Unreal expects the chatter's name as a bracketed prefix: [name]value
+        if speaker:
+            value = f"[{speaker}]{value}"
+        print(f"[ISO] {speaker}: {iso_action.get('phrase')} -> {address} = {value}")
+        send_iso_osc(address, value)
+        return
+
     # Ignore messages from our own bot (prevents self-triggering)
-    if speaker.lower() in ['gem', 'gem_chadee', 'gem-chadee']:
+    if is_own_bot:
         print(f"  → Ignoring message from own bot ({speaker})")
         return
-    
+
     # Ignore echo of our own responses
     message_clean = html.unescape(message).strip()
     for last_response in _last_ai_responses:
         if message_clean == last_response:
             print(f"  → Ignoring echo of last AI response")
             return
-    
+
     # Track chat activity for the idle manager (any real message resets the timer)
     idle.update_activity()
-    
+
+    # Gem Drive commands (!left, !join, ...) are short and deliberately bypass
+    # the wake-word gate. Handled only when GAME_DRIVE_ENABLED is on.
+    game_command = extract_game_command(message)
+    if game_command:
+        print(f"[GAME] {speaker}: !{game_command}")
+        asyncio.create_task(_forward_game_command(speaker, game_command))
+        return
+
     # Check for wake word
     wake_word = None
     for word in config.WAKE_WORDS:
@@ -1222,21 +1344,10 @@ async def handle_incoming_message(data: dict):
             music.play_generated_song(generated)
             await ssn.send_message(f"🎵 Playing my generated song '{generated}'!", targets=config.SSN_TARGETS)
             return
-        
-        # Check Twitch DJ Program restrictions
-        if config.TWITCH_MUSIC_CHECK_ENABLED:
-            result = music.verify_song(song_name)
-            status = result.get('status', 'error')
-            
-            if status == 'restricted':
-                await ssn.send_message(result.get('message', "Sorry, that song is restricted."), targets=config.SSN_TARGETS)
-                return
-            elif status == 'error':
-                await ssn.send_message(result.get('message', "I couldn't identify that song."), targets=config.SSN_TARGETS)
-                return
-            # 'allowed' or 'not_found' -> proceed with download
-        
-        # Check if the song already exists locally before downloading
+
+        # Check the local request folder BEFORE the Twitch DJ lookup, so a song
+        # we already have plays immediately (and isn't blocked by a slow or
+        # failing catalog check).
         existing = music.check_song_exists(song_name)
         if existing:
             music.play_mp3(existing)
@@ -1245,7 +1356,20 @@ async def handle_incoming_message(data: dict):
             else:
                 await ssn.send_message(f"🎵 Already have '{existing}' - playing it now!", targets=config.SSN_TARGETS)
             return
-        
+
+        # Check Twitch DJ Program restrictions
+        if config.TWITCH_MUSIC_CHECK_ENABLED:
+            result = music.verify_song(song_name)
+            status = result.get('status', 'error')
+
+            if status == 'restricted':
+                await ssn.send_message(result.get('message', "Sorry, that song is restricted."), targets=config.SSN_TARGETS)
+                return
+            elif status == 'error':
+                await ssn.send_message(result.get('message', "I couldn't identify that song."), targets=config.SSN_TARGETS)
+                return
+            # 'allowed' or 'not_found' -> proceed with download
+
         music.download_song(song_name)
         if dedication:
             await ssn.send_message(f"🎵 Got it! Downloading '{song_name}' - dedicated to {dedication}!", targets=config.SSN_TARGETS)
@@ -1504,7 +1628,11 @@ async def handle_incoming_message(data: dict):
     response, tool_calls = await llm.chat_with_tools(
         llm_message, system_prompt=system_prompt, tools=tools or None
     )
-    print(f"[GEM] {response}")
+    if response.startswith('Error:'):
+        print(f"[GEM] (LLM error) {response}")
+        response = "Sorry, my thoughts got tangled for a second. Say that again?"
+    else:
+        print(f"[GEM] {response}")
 
     # Execute any tools the LLM requested (question-vs-request is the LLM's job).
     browser_result = None
@@ -1648,6 +1776,7 @@ async def api_resume():
 async def api_status():
     """Full status for GUI"""
     return jsonify({
+        'last_chat': _last_chat,
         'llm': {
             'enabled': llm.enabled,
             'model': config.OLLAMA_MODEL,
@@ -1664,11 +1793,15 @@ async def api_status():
         },
         'tts': {
             'enabled': config.TTS_ENABLED,
+            'client_enabled': tts.enabled,
             'engine': config.TTS_ENGINE,
+            'active_url': tts.tts_url,
             'tts_url': config.TTS_URL,
             'pocket_tts_url': config.POCKET_TTS_URL,
             'vibevoice_tts_url': config.VIBEVOICE_TTS_URL,
             'qwen_tts_url': config.QWEN_TTS_URL,
+            'ming_tts_url': config.MING_TTS_URL,
+            'audio8_tts_url': config.AUDIO8_TTS_URL,
             'vibevoice_model': config.VIBEVOICE_MODEL,
             'vibevoice_inference_steps': config.VIBEVOICE_INFERENCE_STEPS,
             'diffusion_steps': config.TTS_DIFFUSION_STEPS,
@@ -1782,6 +1915,34 @@ async def api_status():
             'system_prompt': config.GAME_AGENT_SYSTEM_PROMPT
         }
     })
+
+
+@app.route('/api/idle/status', methods=['GET'])
+async def api_idle_status():
+    """Live IdleManager state for the control panel."""
+    now = time.time()
+    return jsonify({
+        'enabled': idle.enabled,
+        'is_idle': idle.is_idle,
+        'is_speaking': idle.is_speaking,
+        'inactivity_limit': idle.inactivity_limit,
+        'cooldown': idle.cooldown,
+        'seconds_since_activity': round(now - idle.last_message_time, 1),
+        'seconds_since_last_idle': (
+            round(now - idle.last_idle_time, 1) if idle.last_idle_time else None
+        ),
+        'suppress_enabled': bool(getattr(config, 'GAME_DRIVE_SUPPRESS_IDLE', True)),
+        'game_enabled': bool(getattr(config, 'GAME_DRIVE_ENABLED', False)),
+    })
+
+
+@app.route('/api/idle/trigger', methods=['POST'])
+async def api_idle_trigger():
+    """Manually trigger an idle monologue (for testing)."""
+    if idle.is_speaking:
+        return jsonify({'status': 'busy'}), 409
+    asyncio.create_task(idle.trigger_monologue())
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/api/browser/monitors', methods=['GET'])
@@ -1899,6 +2060,7 @@ async def api_update_settings():
     if 'ollama_model' in data:
         config.OLLAMA_MODEL = data['ollama_model']
         llm.model = data['ollama_model']
+        llm.tools_supported = None  # re-probe tool support for the new model
     if 'ssn_session_id' in data:
         config.SSN_SESSION_ID = data['ssn_session_id']
         ssn.session_id = data['ssn_session_id']
@@ -1913,11 +2075,15 @@ async def api_update_settings():
     if 'tts_engine' in data:
         config.TTS_ENGINE = data['tts_engine']
         tts.tts_url = _tts_url_for_engine()
+        print(
+            f"[SETTINGS] TTS engine -> {config.TTS_ENGINE} url={tts.tts_url}",
+            flush=True,
+        )
         # Re-check connection against the new engine's URL
         await tts.check_connection()
     if 'tts_url' in data:
         config.TTS_URL = data['tts_url']
-        if config.TTS_ENGINE not in ("pocket", "vibevoice"):
+        if config.TTS_ENGINE not in ("pocket", "vibevoice", "qwen", "ming"):
             tts.tts_url = data['tts_url']
     if 'pocket_tts_url' in data:
         config.POCKET_TTS_URL = data['pocket_tts_url']
@@ -1931,6 +2097,16 @@ async def api_update_settings():
         config.QWEN_TTS_URL = data['qwen_tts_url']
         if config.TTS_ENGINE == "qwen":
             tts.tts_url = data['qwen_tts_url']
+    if 'ming_tts_url' in data:
+        config.MING_TTS_URL = data['ming_tts_url']
+        print(f"[SETTINGS] MING_TTS_URL -> {config.MING_TTS_URL}", flush=True)
+        if config.TTS_ENGINE == "ming":
+            tts.tts_url = data['ming_tts_url']
+    if 'audio8_tts_url' in data:
+        config.AUDIO8_TTS_URL = data['audio8_tts_url']
+        print(f"[SETTINGS] AUDIO8_TTS_URL -> {config.AUDIO8_TTS_URL}", flush=True)
+        if config.TTS_ENGINE == "audio8":
+            tts.tts_url = data['audio8_tts_url']
     if 'vibevoice_model' in data:
         config.VIBEVOICE_MODEL = data['vibevoice_model']
     if 'vibevoice_inference_steps' in data:
@@ -2172,6 +2348,18 @@ async def api_update_settings():
         config.GAME_AGENT_TURN_ADDRESS = data['game_agent_turn_address']
     if 'game_agent_system_prompt' in data:
         config.GAME_AGENT_SYSTEM_PROMPT = data['game_agent_system_prompt']
+    if 'game_drive_enabled' in data:
+        config.GAME_DRIVE_ENABLED = bool(data['game_drive_enabled'])
+    if 'game_drive_suppress_idle' in data:
+        config.GAME_DRIVE_SUPPRESS_IDLE = bool(data['game_drive_suppress_idle'])
+    if 'game_drive_url' in data:
+        config.GAME_DRIVE_URL = str(data['game_drive_url']).strip()
+    if 'game_drive_commentary_enabled' in data:
+        config.GAME_DRIVE_COMMENTARY_ENABLED = bool(data['game_drive_commentary_enabled'])
+    if 'game_drive_commentary_cooldown_s' in data:
+        config.GAME_DRIVE_COMMENTARY_COOLDOWN_S = float(data['game_drive_commentary_cooldown_s'])
+    if 'game_drive_commentary_use_llm' in data:
+        config.GAME_DRIVE_COMMENTARY_USE_LLM = bool(data['game_drive_commentary_use_llm'])
     if 'background_volume' in data:
         config.BACKGROUND_VOLUME = data['background_volume']
         music.background_volume = data['background_volume']
@@ -2300,6 +2488,46 @@ async def api_osc_actions_set():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/api/iso/osc_actions', methods=['GET'])
+async def api_iso_osc_actions_get():
+    """Get Isometric game OSC settings and actions."""
+    return jsonify({
+        'status': 'ok',
+        'enabled': config.ISO_GAME_ENABLED,
+        'ip': config.ISO_OSC_IP,
+        'port': config.ISO_OSC_PORT,
+        'actions': config.ISO_OSC_ACTIONS,
+    })
+
+
+@app.route('/api/iso/osc_actions', methods=['POST'])
+async def api_iso_osc_actions_set():
+    """Set Isometric game OSC settings and actions (live)."""
+    data = await request.get_json(silent=True) or {}
+    if 'enabled' in data:
+        config.ISO_GAME_ENABLED = bool(data['enabled'])
+    if 'ip' in data:
+        config.ISO_OSC_IP = str(data['ip']).strip() or config.ISO_OSC_IP
+    if 'port' in data:
+        config.ISO_OSC_PORT = int(data['port'])
+    if 'actions' in data:
+        config.ISO_OSC_ACTIONS = data['actions'] or []
+    save_config()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/iso/osc/test', methods=['POST'])
+async def api_iso_osc_test():
+    """Send a raw OSC message to the Isometric game target."""
+    data = await request.get_json(silent=True) or {}
+    address = str(data.get('address', '') or '')
+    value = data.get('value', '')
+    if not address:
+        return jsonify({'status': 'error', 'error': 'No address specified'}), 400
+    success = send_iso_osc(address, value)
+    return jsonify({'status': 'ok' if success else 'error'})
+
+
 @app.route('/api/osc/emote', methods=['POST'])
 async def api_osc_emote():
     """Send an OSC emote"""
@@ -2359,6 +2587,25 @@ def send_osc_message(address: str, value) -> bool:
         return True
     except Exception as e:
         print(f"OSC failed: {e}")
+        return False
+
+
+def send_iso_osc(address: str, value) -> bool:
+    """Send an OSC message to the Isometric Unreal game (string + True)."""
+    if not address:
+        print(f"[ISO] OSC skipped: empty address (value='{value}')")
+        return False
+    try:
+        from pythonosc import udp_client, osc_message_builder
+        builder = osc_message_builder.OscMessageBuilder(address=address)
+        builder.add_arg(str(value), builder.ARG_TYPE_STRING)
+        builder.add_arg(True, builder.ARG_TYPE_TRUE)
+        client = udp_client.SimpleUDPClient(config.ISO_OSC_IP, config.ISO_OSC_PORT)
+        client.send(builder.build())
+        print(f"[ISO] OSC SENT: '{value}' to {config.ISO_OSC_IP}:{config.ISO_OSC_PORT} {address}")
+        return True
+    except Exception as e:
+        print(f"[ISO] OSC failed: {e}")
         return False
 
 
@@ -2597,7 +2844,14 @@ async def api_tts():
     data = await request.get_json()
     text = data.get('text', '')
 
+    print(
+        f"[TTS-API] text_len={len(text)} engine={config.TTS_ENGINE} "
+        f"url={tts.tts_url} enabled={tts.enabled}",
+        flush=True,
+    )
+    started = time.time()
     await send_response(text)
+    print(f"[TTS-API] done in {time.time() - started:.1f}s", flush=True)
     return jsonify({'status': 'ok'})
 
 
@@ -2748,6 +3002,15 @@ async def face_event():
     return jsonify({'status': 'ok'})
 
 
+@app.route('/api/game/event', methods=['POST'])
+async def game_event():
+    """Called by the Gem Drive process for crashes / leader changes.
+    Fire-and-forget: commentary runs in the background (throttled)."""
+    data = await request.get_json(silent=True) or {}
+    asyncio.create_task(handle_game_event(data))
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/chat', methods=['POST'])
 async def chat():
     """HTTP chat endpoint (alternative to WebSocket)"""
@@ -2865,6 +3128,107 @@ async def shutdown():
         await browser.close()
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Gem Drive (chat-controlled 3D highway game)
+# ---------------------------------------------------------------------------
+_game_commentary_last = 0.0
+_game_commentary_lock = asyncio.Lock()
+_game_last_error_log = 0.0
+
+_GAME_COMMENTARY_FALLBACKS = {
+    'crash': "{user} found the traffic. Back on the road in a moment!",
+    'leader': "{user} is leading the highway now!",
+    'milestone': "{user} just passed {score} meters. Nice cruising!",
+    'session_start': "The chat highway is open! Type !join and drive with me.",
+}
+
+
+async def _forward_game_command(speaker: str, command: str):
+    """Forward a !command to the Gem Drive process (fire-and-forget)."""
+    global _game_last_error_log
+    url = getattr(config, 'GAME_DRIVE_URL', 'http://127.0.0.1:5010').rstrip('/')
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=0.75) as client:
+            await client.post(f"{url}/api/command", json={'user': speaker, 'command': command})
+    except Exception as e:
+        now = time.monotonic()
+        if now - _game_last_error_log > 30.0:
+            print(f"[GAME] command forward failed ({type(e).__name__}: {e})")
+            _game_last_error_log = now
+
+
+async def handle_game_event(data: dict):
+    """React to Gem Drive events (crash / new leader / milestone / session start).
+
+    Throttled so Gem only comments occasionally and never stacks TTS calls on
+    top of normal chat replies. Called from POST /api/game/event.
+    """
+    global _game_commentary_last
+    if not getattr(config, 'GAME_DRIVE_ENABLED', False):
+        return
+    if not getattr(config, 'GAME_DRIVE_COMMENTARY_ENABLED', True):
+        return
+    if data.get('demo'):
+        return
+    if _paused:
+        return
+
+    event_type = str(data.get('type') or '').strip().lower()
+    if event_type not in _GAME_COMMENTARY_FALLBACKS:
+        return
+
+    user = str(data.get('user') or 'someone').strip()[:24] or 'someone'
+    score = int(data.get('score') or 0)
+    now = time.monotonic()
+    cooldown = float(getattr(config, 'GAME_DRIVE_COMMENTARY_COOLDOWN_S', 45.0))
+
+    # Session start is allowed to speak even shortly after a crash comment.
+    if event_type != 'session_start' and now - _game_commentary_last < cooldown:
+        return
+    # Respect the shared TTS WAV: don't talk over an active reply.
+    if audio_player.is_playing():
+        return
+
+    descriptions = {
+        'crash': f"{user}'s car just crashed into traffic at {score} meters.",
+        'leader': f"{user} just took the lead with {score} meters.",
+        'milestone': f"{user} just passed {score} meters in the chat driving game.",
+        'session_start': "The chat-driven highway game just started; viewers type !join to add a car.",
+    }
+    fallback = _GAME_COMMENTARY_FALLBACKS[event_type].format(user=user, score=score)
+    prompt = (
+        "You are Gem, watching a silly slow-paced chat-controlled driving game. "
+        f"{descriptions[event_type]} React in character in ONE short sentence "
+        "(max 20 words). No hashtags, no emojis, no quotes."
+    )
+
+    async with _game_commentary_lock:
+        now = time.monotonic()
+        if event_type != 'session_start' and now - _game_commentary_last < cooldown:
+            return
+        if audio_player.is_playing():
+            return
+        _game_commentary_last = now
+
+        response = ''
+        if getattr(config, 'GAME_DRIVE_COMMENTARY_USE_LLM', True):
+            try:
+                response = await llm.chat(prompt, system_prompt=config.SYSTEM_PROMPT)
+            except Exception as e:
+                print(f"[GAME] commentary LLM failed: {e}")
+        response = (response or '').strip().split('\n')[0].strip().strip('"').strip("'")
+        if not response or response.startswith('Error'):
+            response = fallback
+        elif len(response) > 220:
+            response = response[:217].rsplit(' ', 1)[0] + '...'
+
+        print(f"[GEM] (game) {response}")
+        add_to_chat_history('Gem', response)
+        _last_ai_responses.append(html.unescape(response).strip())
+        await send_response(response)
 
 
 if __name__ == '__main__':

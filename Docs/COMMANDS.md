@@ -87,16 +87,40 @@ Also see: emotes in any LLM-path message get glossed via `config.EMOTE_MEANINGS`
 
 | Trigger | Entry | Action |
 |---|---|---|
-| Twitch sub/resub/gift/follow/raid/cheer | `handle_twitch_event` main.py:197 (EventSub, startup main.py:2813-2817) | Canned thank-you via `send_response`; sub events fire `TWITCH_SUB_ANIMATION` with ducking (main.py:183-194) |
-| **Face appears on stream** (recognized or unknown) | vision.py `FaceRecognizer` scan loop → `POST /api/face_event` (main.py:2709) → `handle_face_event` main.py:254 | Memory event ("Gem sees X on the stream camera") + in-character greeting via `send_response` when `VISION_FACE_GREET_ENABLED` (per-person cooldown `VISION_FACE_GREET_COOLDOWN_S`, global 20s gap, skipped while TTS plays). Unknowns reported when `VISION_FACE_REPORT_UNKNOWN` |
+| Twitch sub/resub/gift/follow/raid/cheer | `handle_twitch_event` main.py:198 (EventSub, startup main.py:2900) | Canned thank-you via `send_response`; sub events fire `TWITCH_SUB_ANIMATION` with ducking (main.py:184-195) |
+| **Face appears on stream** (recognized or unknown) | vision.py `FaceRecognizer` scan loop → `POST /api/face_event` (main.py:2786) → `handle_face_event` main.py:260 | Memory event ("Gem sees X on the stream camera") + in-character greeting via `send_response` when `VISION_FACE_GREET_ENABLED` (per-person cooldown `VISION_FACE_GREET_COOLDOWN_S`, global 20s gap, skipped while TTS plays). Unknowns reported when `VISION_FACE_REPORT_UNKNOWN` |
 | Chat silence for `IDLE_INACTIVITY_LIMIT` (120s) | `IdleManager.monitor_loop` (clients/idle_manager.py:134) | Topic from `config.IDLE_TOPICS` → LLM monologue w/ memory context → `send_response`; OSC state values bored/normal/talk/idle |
-| GUI "Test TTS" | `POST /api/tts` main.py:2561 | Full `send_response` pipeline |
-| GUI test emotes/animations | `POST /api/osc/emote`, `/api/osc/test_animation`, `/api/osc/test` (main.py:2270-2299) | Direct OSC sends |
-| GUI face enrollment | `POST /api/vision/faces/enroll` (main.py:2223, proxied to vision.py) | Enrolls the person currently on camera (exactly one face required); re-enrolling averages samples |
-| Mic speech (any) | `POST /api/voice_activity` main.py:2728 | Resets idle timer only |
-| Mic transcription | `POST /process` main.py:2736 | Enters the normal pipeline as speaker `VOICE_SPEAKER_NAME` |
+| GUI "Test TTS" | `POST /api/tts` main.py:2638 | Full `send_response` pipeline |
+| GUI test emotes/animations | `POST /api/osc/emote`, `/api/osc/test_animation`, `/api/osc/test` (main.py:2348-2377) | Direct OSC sends |
+| GUI face enrollment | `POST /api/vision/faces/enroll` (main.py:2288, proxied to vision.py) | Enrolls the person currently on camera (exactly one face required); re-enrolling averages samples |
+| Mic speech (any) | `POST /api/voice_activity` main.py:2815 | Resets idle timer only |
+| Mic transcription | `POST /process` main.py:2823 | Enters the normal pipeline as speaker `VOICE_SPEAKER_NAME` |
 
-## 9. Laya fast-lane (optional pre-filter, before main.py)
+## 9. Gem Drive — `!` commands (chat-controlled 3D highway)
+
+`drive_game/` is a separate process (Ursina, port **5010**) where every viewer can own a car.
+Commands are **not** wake-word gated: they must start with `!` and are matched by
+`extract_game_command` (main.py:744) at main.py:1153, **before** the wake-word gate
+(main.py:1159). This is intentional; the hook is inert unless `GAME_DRIVE_ENABLED = True`
+and the command is in `GAME_DRIVE_COMMANDS`.
+
+| Command | Aliases | Effect |
+|---|---|---|
+| `!join` | — | Adds/keeps the sender's car (auto-join happens on any command) |
+| `!left` / `!right` | `!l` / `!r` | Shift one lane (smooth, ~0.55s) |
+| `!faster` / `!slower` | `!gas`, `!accelerate`, `!speedup` / `!slow` | Change cruise speed by 3 u/s (6–22 u/s) |
+| `!brake` | `!stop` | Drop to 3 u/s for 3 seconds |
+| `!leave` | `!quit` | Remove the sender's car |
+| `!score` | `!stats`, `!leaderboard` | Request run/best score (answered by the game, not chat) |
+
+Rules: max 12 cars, 3-minute inactivity despawn, 2s per-viewer cooldown, 12 commands/s global
+limit. Commands are forwarded fire-and-forget to `GAME_DRIVE_URL/api/command`; they never enter
+chat history, memory, or the LLM. Crash/leader/milestone events come back on
+`POST /api/game/event` (main.py:2795) → `handle_game_event` (main.py:2953), which comments via
+`send_response` at most once per `GAME_DRIVE_COMMENTARY_COOLDOWN_S` (45s), with an LLM one-liner
+and canned fallback. Start the game with `start_scripts/start_drive_game.bat` (env `drive_game`).
+
+## 10. Laya fast-lane (optional pre-filter, before main.py)
 
 When `LAYA_ENABLED` and the SSN extension posts to Laya (`:5002`) instead of main.py
 directly, `clients/laya_server.py` classifies every message with the local Laya model
@@ -105,16 +129,19 @@ directly, `clients/laya_server.py` classifies every message with the local Laya 
 - **Animation cue**: if an animation from `LAYA_ANIMATION_MAP` is detected with probability ≥
   `LAYA_ANIMATION_THRESHOLD`, Laya sends the OSC body cue **directly to Unreal** — no LLM
   round-trip, so the avatar reacts instantly.
-- **Reply gate**: message is forwarded to `POST /chat` (main.py:2718) only if
+- **Reply gate**: message is forwarded to `POST /chat` (main.py:2805) only if
   `should_reply` ≥ `LAYA_REPLY_THRESHOLD`; wake-word messages always pass.
+- **Gem Drive `!` commands** (laya_server.py:114) bypass the model entirely and are forwarded
+  when `GAME_DRIVE_ENABLED` is on — otherwise Laya would classify them as noise.
 - Dropped messages still produce the body cue. Without Laya running, SSN posts to main.py
   directly and this layer doesn't exist.
 
-## 10. Where the full phrase lists live (for maintenance)
+## 11. Where the full phrase lists live (for maintenance)
 
-All matchers are in main.py between `extract_song_command` (main.py:652) and
-`extract_weather_location` (main.py:1084) — a contiguous block of pure functions, no state.
+All matchers are in main.py between `extract_song_command` (main.py:626) and
+`extract_weather_location` (main.py:1099) — a contiguous block of pure functions, no state.
 Wake words: `config.WAKE_WORDS` (config_example.py:243). Vision words:
 `config.VISION_TRIGGER_WORDS` (config_example.py:204). Emote glosses:
 `config.EMOTE_MEANINGS` (config_example.py:246). Idle topics: `config.IDLE_TOPICS`. Face
-recognition keys: `config.VISION_FACE_*` (config_example.py:209-220).
+recognition keys: `config.VISION_FACE_*` (config_example.py:209-220). Gem Drive keys:
+`config.GAME_DRIVE_*` (config_example.py:264-277).

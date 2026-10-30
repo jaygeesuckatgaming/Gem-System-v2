@@ -271,35 +271,45 @@ class MusicClient:
     def check_song_exists(self, query: str) -> Optional[str]:
         """Check if a similar song already exists in the download folder.
         Returns the filename if found, otherwise None.
+
+        Matching is deliberately forgiving: it strips bracketed/parenthesised
+        tags, common suffixes, and punctuation, then matches when the query's
+        tokens are all present in a filename (or vice versa).
         """
+        import re
+
         if not os.path.isdir(self.download_folder):
             return None
 
-        query_clean = query.lower().strip()
-        for suffix in [" official video", " official audio", " lyrics", " hd", " 4k"]:
-            query_clean = query_clean.replace(suffix, "")
+        def _normalize(value: str) -> str:
+            value = value.lower()
+            value = re.sub(r'\[[^\]]*\]', ' ', value)
+            value = re.sub(r'\([^)]*\)', ' ', value)
+            for suffix in (
+                " official music video", " official video", " official audio",
+                " official hd remaster", " lyrics", " hd", " 4k", " audio", " video",
+            ):
+                value = value.replace(suffix, " ")
+            value = re.sub(r'[^a-z0-9]+', ' ', value)
+            return re.sub(r'\s+', ' ', value).strip()
 
-        if " - " in query_clean:
-            parts = query_clean.split(" - ")
-            artist = parts[0].strip()
-            title = parts[1].strip() if len(parts) > 1 else ""
-        else:
-            artist = ""
-            title = query_clean
+        query_norm = _normalize(query)
+        if not query_norm:
+            return None
+        q_tokens = set(query_norm.split())
 
-        import re
         for filename in os.listdir(self.download_folder):
             if not filename.lower().endswith(".mp3"):
                 continue
-            filename_clean = filename.lower()[:-4]
-            filename_clean = re.sub(r'\s*\[[a-zA-Z0-9_-]+\]\s*$', '', filename_clean)
+            name_norm = _normalize(filename.lower()[:-4])
+            if not name_norm:
+                continue
 
-            artist_match = (artist in filename_clean or filename_clean in artist) if artist else False
-            title_match = (title in filename_clean or filename_clean in title) if title else False
-            full_match = query_clean in filename_clean or filename_clean in query_clean
+            if query_norm in name_norm or name_norm in query_norm:
+                return filename
 
-            if (artist_match and title_match) or full_match:
-                print(f"🎵 Found existing file: {filename}")
+            name_tokens = set(name_norm.split())
+            if len(q_tokens) >= 2 and q_tokens <= name_tokens:
                 return filename
 
         return None

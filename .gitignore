@@ -83,3 +83,26 @@ tts/Qwen3-TTS/
 # OS
 .DS_Store
 Thumbs.db
+
+# Large downloaded media library (3 GB)
+music/requests/
+
+# Runtime logs
+*.log
+
+# Local config backups (contain secrets)
+config.py.backup-*
+
+# Ollama log proxy SQLite databases (runtime state)
+ollama-logs.db*
+start_scripts/ollama-logs.db*
+
+# TTS model repos / cloned engines (separate git repos or model weights)
+tts/Audio8_TTS/
+tts/Ming-3.0-tts/
+tts/Ming-30-tts-05b/
+tts/sembridge/
+tts/StyleTTS2_Chat_Reader/
+
+# Stray console dump
+extras/onviffiles

@@ -3,9 +3,10 @@
 **Audience:** AI coding assistants + maintainer. **Answers:** "a message arrived — who sees it,
 what guards run, which interceptor fires, what the LLM gets, and what comes out?"
 
-Last verified: 2026-10-12. All `file:line` refs are as of this date.
+Last verified: 2026-10-20. Refs below were updated for the Gem Drive command hook; refs outside
+the touched sections may lag by a few lines.
 
-The entire pipeline lives in one function: `handle_incoming_message()` (main.py:1100-1564).
+The entire pipeline lives in one function: `handle_incoming_message()` (main.py:1115-1597).
 Everything below walks through it in exact source order. Trigger phrase patterns are cataloged
 in [COMMANDS.md](COMMANDS.md); process boundaries in [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -27,30 +28,34 @@ All paths converge on the same function (or inject into the same response path):
 
 ## 2. The ordered walkthrough
 
-### Stage A — Guards (main.py:1100-1144)
+### Stage A — Guards + Gem Drive hook (main.py:1118-1167)
 
 In order, each one can silently drop the message:
 
-1. **Pause gate** (main.py:1103): `_paused` flag (toggled by GUI `POST /api/pause`/`/api/resume`)
+1. **Pause gate** (main.py:1118): `_paused` flag (toggled by GUI `POST /api/pause`/`/api/resume`)
    → drop everything.
-2. **"jim" → "Gem" substitution** (main.py:1112): regex `\bjim\b` case-insensitive, applied to
+2. **"jim" → "Gem" substitution** (main.py:1128): regex `\bjim\b` case-insensitive, applied to
    the whole message. "jim" is an alternate wake name, not a bug.
-3. **Known-speaker tracking** (main.py:1117-1119): first time a `chatname` appears it's saved to
+3. **Known-speaker tracking** (main.py:1132-1134): first time a `chatname` appears it's saved to
    `known_speakers.json` (used later for nickname resolution in memory recall).
-4. **Self blocklist** (main.py:1122-1124): speakers `gem`, `gem_chadee`, `gem-chadee` ignored —
+4. **Self blocklist** (main.py:1137-1139): speakers `gem`, `gem_chadee`, `gem-chadee` ignored —
    prevents the bot reacting to its own outbound chat messages.
-5. **Echo guard** (main.py:1127-1131): if the message equals any of the last 10 AI responses
+5. **Echo guard** (main.py:1142-1146): if the message equals any of the last 10 AI responses
    (`_last_ai_responses` deque, main.py:405) → drop. Platforms echo posted messages back.
-6. **Idle activity ping** (main.py:1134): any real message resets the idle-monologue timer.
-7. **Wake-word gate** (main.py:1137-1144): message must contain one of `config.WAKE_WORDS`
+6. **Idle activity ping** (main.py:1149): any real message resets the idle-monologue timer.
+7. **Gem Drive command hook** (main.py:1153-1157): `extract_game_command` (main.py:744) matches
+   `!left`, `!join`, etc. **before** the wake-word gate and forwards them to the game process
+   (fire-and-forget). Inert unless `GAME_DRIVE_ENABLED`; commands never reach memory, history,
+   or the LLM. See [COMMANDS.md §9](COMMANDS.md).
+8. **Wake-word gate** (main.py:1159-1167): message must contain one of `config.WAKE_WORDS`
    (default `["gem", "hey gem", "ok gem"]`) **anywhere** (substring, not prefix). No wake word →
    silently dropped. This is the #1 reason "Gem didn't respond".
 
-### Stage B — Interceptor chain (main.py:1146-1470)
+### Stage B — Interceptor chain (main.py:1170-1500)
 
 First match wins — each block handles the message and **returns**; the LLM never sees it.
 Extractors strip the wake-word prefix themselves before parsing (e.g. `extract_song_command`
-main.py:659). Exact trigger phrases: see [COMMANDS.md](COMMANDS.md).
+main.py:626). Exact trigger phrases: see [COMMANDS.md](COMMANDS.md).
 
 | # | Interceptor | Guard | Handler | What it does |
 |---|---|---|---|---|
@@ -76,7 +81,7 @@ song request/download acknowledgements, stop music, make-a-song ack, resume back
 songs, OpenCode. Interceptors that reply via **`send_response()`** (TTS + chat): URL browse,
 sing (plays music instead), who-do-you-see, vision, time, weather.
 
-### Stage C — Default LLM path (main.py:1473-1564)
+### Stage C — Default LLM path (main.py:1502-1597)
 
 Only messages that survived every interceptor get here:
 
@@ -148,7 +153,7 @@ dropping to idle. Base pose `sitting` → send stop/idle instead.
 main.py:2765) fires when chat is quiet for `IDLE_INACTIVITY_LIMIT` (120s) and cooldown elapsed:
 picks topic → OSC state change → LLM monologue with memory context (main.py:349-369) →
 `send_response()`. Guarded by `idle.is_speaking_check` (no stacking while TTS plays,
-main.py:386). Any chat message (main.py:1134) or mic activity (`/api/voice_activity`,
+main.py:386). Any chat message (main.py:1149) or mic activity (`/api/voice_activity`,
 main.py:2732) resets the timer and interrupts a playing monologue (main.py:375-379).
 
 **E. Face recognition cadence.** vision.py's `FaceRecognizer` scan thread runs every
@@ -173,7 +178,9 @@ flowchart TD
     F --> G{own bot name or<br/>echo of last 10?}
     G -->|yes| X3[drop]
     G -->|no| H[idle timer reset]
-    H --> I{wake word?}
+    H --> GD{! game command?}
+    GD -->|yes| XG[forward to drive_game :5010<br/>no LLM, no history]
+    GD -->|no| I{wake word?}
     I -->|no| X4[drop silently]
     I -->|yes| J{URL + browser?}
     J -->|yes| K[browser agent → LLM summary]

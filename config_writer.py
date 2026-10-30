@@ -22,21 +22,33 @@ def _quoted_or_triple(key):
     """Pattern matching a KEY assignment in ANY stored format:
     triple-quoted (\"\"\"...\"\"\"), single-quoted repr, or double-quoted."""
     return re.compile(
-        rf'^{key}\s*=\s*(?:"{3}.*?"{3}|\'(?:[^\'\\]|\\.)*\'|"(?:[^"\\]|\\.)*")\s*',
+        rf'^{key}\s*=\s*(?:"{3}.*?"{3}|\'(?:[^\'\\]|\\.)*\'|"(?:[^"\\]|\\.)*")[ 	]*',
         re.MULTILINE | re.DOTALL,
     )
 
 
 def _bracket_list(key):
     """Pattern matching a KEY assignment holding a [...] literal."""
-    return re.compile(rf'^{key}\s*=\s*\[.*?\]\s*', re.MULTILINE | re.DOTALL)
+    return re.compile(rf'^{key}\s*=\s*\[.*?\][ 	]*', re.MULTILINE | re.DOTALL)
+
+
+def _paren_or_quoted(key):
+    """Pattern matching a KEY stored as a parenthesized string concatenation
+    (the form IDLE_MONOLOGUE_PROMPT uses) or any quoted form."""
+    return re.compile(
+        rf'^{key}\s*=\s*(?:\(.*?^\s*\)|"{3}.*?"{3}|\'(?:[^\'\\]|\\.)*\'|"(?:[^"\\]|\\.)*")[ 	]*',
+        re.MULTILINE | re.DOTALL,
+    )
 
 
 # Special (non-simple) keys: (serializer, pattern)
 _SPECIAL_HANDLERS = {
     'SYSTEM_PROMPT': (repr, _quoted_or_triple('SYSTEM_PROMPT')),
     'GAME_AGENT_SYSTEM_PROMPT': (repr, _quoted_or_triple('GAME_AGENT_SYSTEM_PROMPT')),
+    'IDLE_MONOLOGUE_PROMPT': (repr, _paren_or_quoted('IDLE_MONOLOGUE_PROMPT')),
     'OSC_ACTIONS': (lambda v: pprint.pformat(v, width=120), _bracket_list('OSC_ACTIONS')),
+    'ISO_OSC_ACTIONS': (lambda v: pprint.pformat(list(v), width=120), _bracket_list('ISO_OSC_ACTIONS')),
+    'IDLE_TOPICS': (lambda v: pprint.pformat(list(v), width=120), _bracket_list('IDLE_TOPICS')),
     'LAYA_ANIMATION_MAP': (lambda v: pprint.pformat(v, width=120), _bracket_list('LAYA_ANIMATION_MAP')),
     'LAYA_ANIMATION_OPTIONS': (lambda v: pprint.pformat(v, width=120), _bracket_list('LAYA_ANIMATION_OPTIONS')),
     'BROWSER_BLOCKED_TERMS': (lambda v: pprint.pformat(v, width=120), _bracket_list('BROWSER_BLOCKED_TERMS')),

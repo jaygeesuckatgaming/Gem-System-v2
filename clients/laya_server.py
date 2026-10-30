@@ -45,12 +45,22 @@ app = Quart(__name__)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "laya")
 
 _laya_agent = None
+_laya_load_attempted = False
 
 
 def _load_laya():
     """Load the Laya model once. Returns None if unavailable (graceful degradation)."""
-    global _laya_agent
-    if _laya_agent is None:
+    global _laya_agent, _laya_load_attempted
+    if not getattr(config, "LAYA_LOAD_MODEL", True):
+        if not _laya_load_attempted:
+            _laya_load_attempted = True
+            print(
+                "Laya model disabled (LAYA_LOAD_MODEL=False) - pass-through mode",
+                flush=True,
+            )
+        return None
+    if _laya_agent is None and not _laya_load_attempted:
+        _laya_load_attempted = True
         try:
             import laya as laya_lib  # noqa: F401 - external library
             if os.path.isdir(MODEL_PATH):
@@ -108,6 +118,24 @@ async def handle_chat():
 
     if not chat_message:
         return jsonify({"status": "ignored"}), 200
+
+    # Gem Drive commands (!left, !join, ...) must reach main.py unmodified:
+    # Laya would otherwise classify them as noise and drop them.
+    if getattr(config, "GAME_DRIVE_ENABLED", False) and chat_message.lstrip().startswith("!"):
+        await _forward_to_main(chatter_name, chat_message)
+        return jsonify({"status": "processed", "gated": False, "game_command": True}), 200
+
+    # Isometric game phrases are exact-match OSC triggers; don't let Laya drop them.
+    if getattr(config, "ISO_GAME_ENABLED", False):
+        iso_text = chat_message.strip().lower().lstrip("!").strip()
+        iso_phrases = {
+            str(a.get("phrase", "")).strip().lower().lstrip("!").strip()
+            for a in getattr(config, "ISO_OSC_ACTIONS", []) or []
+            if isinstance(a, dict)
+        }
+        if iso_text and iso_text in iso_phrases:
+            await _forward_to_main(chatter_name, chat_message)
+            return jsonify({"status": "processed", "gated": False, "iso_command": True}), 200
 
     laya_agent = _load_laya()
 
@@ -170,10 +198,16 @@ async def handle_chat():
 async def _forward_to_main(chatter_name: str, chat_message: str):
     """Forward an approved message to the main server's /chat endpoint."""
     try:
+        print(f"Forwarding to {config.LAYA_URL}: {chat_message[:80]!r}", flush=True)
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 config.LAYA_URL,
-                json={"chatmessage": chat_message, "chatname": chatter_name}
+                json={
+                    "chatmessage": chat_message,
+                    "chatname": chatter_name,
+                    "source": "laya",
+                    "laya_approved": True,
+                }
             )
             print(f"Forward to main server: HTTP {resp.status_code}", flush=True)
     except Exception as e:

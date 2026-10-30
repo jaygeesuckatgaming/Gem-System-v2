@@ -1,0 +1,6 @@
+# Gem Drive environment (conda env: drive_game, Python 3.11)
+# Install with:
+#   conda run -n drive_game pip install -r drive_game/requirements.txt
+ursina==7.0.0
+httpx==0.28.1
+pytest

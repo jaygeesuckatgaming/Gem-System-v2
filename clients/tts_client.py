@@ -38,15 +38,28 @@ class TTSClient:
         try:
             # Send both 'chatmessage' and 'text' so any engine (StyleTTS2, Pocket, VibeVoice) works
             payload = {"chatmessage": clean_text, "text": clean_text}
-            print(f"TTS: Synthesizing '{clean_text[:60]}...'")
+            print(
+                f"[TTS] POST {self.tts_url} chars={len(clean_text)} "
+                f"preview={clean_text[:60]!r}",
+                flush=True,
+            )
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(self.tts_url, json=payload)
                 if response.status_code == 200:
                     self.enabled = True
-                    print(f"✓ TTS complete")
+                    print(
+                        f"[TTS] OK {self.tts_url} status={response.status_code} "
+                        f"bytes={len(response.content)} "
+                        f"content_type={response.headers.get('content-type')}",
+                        flush=True,
+                    )
                     return True
                 else:
-                    print(f"✗ TTS failed: {response.status_code}")
+                    print(
+                        f"[TTS] FAIL {self.tts_url} status={response.status_code} "
+                        f"body={response.text[:200]!r}",
+                        flush=True,
+                    )
                     return False
         except Exception as e:
             print(f"✗ TTS error: {e}")

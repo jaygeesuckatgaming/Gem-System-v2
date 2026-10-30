@@ -5,7 +5,7 @@ You are working on **Gem-System v2**, a Windows-based AI VTuber livestreaming pl
 speaks via TTS, plays and generates music, browses the web, watches its own stream via
 OpenCV face recognition, and remembers past conversations.
 
-Last verified: 2026-10-12. All `file:line` references are as of this date — re-verify against
+Last verified: 2026-10-20. All `file:line` references are as of this date — re-verify against
 code before relying on them, and **update them (and the docs below) whenever you change
 behavior**.
 
@@ -23,6 +23,9 @@ Chat platforms → Social Stream Ninja (SSN)
 
 vision.py (:5001) watches the OBS output (NDI) → face recognition (YuNet+SFace)
     → appeared-events POST /api/face_event → greeting + memory + LLM context
+
+drive_game/ (:5010, Ursina window) ← !commands forwarded by main.py
+    → crash/leader events POST /api/game/event → Gem commentary (throttled TTS + chat)
 ```
 
 ## Documentation index (read the one matching your task)
@@ -39,18 +42,24 @@ vision.py (:5001) watches the OBS output (NDI) → face recognition (YuNet+SFace
 
 - **`config.py` is the single source of truth** for ALL settings (gitignored; template:
   `config_example.py`). Every process reads it. Runtime changes are **written back into
-  `config.py` by regex rewriting** in `save_config()` (main.py:460) — never edit settings any
+  `config.py` by regex rewriting** in `save_config()` (main.py:461) — never edit settings any
   other way, and never hand-edit a value the GUI owns without expecting it to be overwritten.
-- **`main.py` (2,847 lines)** holds the message pipeline (~main.py:1100-1564), all HTTP
+- **`main.py` (3,032 lines)** holds the message pipeline (~main.py:1115-1597), all HTTP
   endpoints, OSC helpers, and persistence. The one giant function to know is
-  `handle_incoming_message()` (main.py:1100).
+  `handle_incoming_message()` (main.py:1115).
 - **Interceptor-first design**: most intents (music, countdown, time, weather, OpenCode, URLs,
   vision, "who do you see") are handled by phrase matching *before* the LLM. The LLM only
   handles conversation plus two tool calls: `trigger_animation` and `browse_web`
-  (main.py:1520-1545).
+  (main.py:1547-1552).
 - **`gui.py` (3,866 lines)** is the control panel: it launches every service via
   `start_scripts/*.bat` (each in its own conda env, own console window) and edits settings via
   `POST /api/settings` → `save_config()`.
+- **`drive_game/` is a separate Ursina game process** (`start_drive_game.bat`, conda env
+  `drive_game`, API :5010). Viewers drive with `!left`, `!right`, `!faster`, `!slower`,
+  `!brake`, `!join`, `!leave`, `!score`. main.py forwards commands before the wake-word gate
+  (main.py:1153) and throttles Gem's commentary from `/api/game/event` (main.py:2795).
+  `GAME_DRIVE_ENABLED` is off by default. Custom models live in `models/cars/`
+  (gitignored; per-viewer files named after the chatname) — see `drive_game/MODELS.md`.
 - **Face recognition lives in vision.py** (not main.py): a scan thread every 5s matches faces
   against `models/faces/enrolled/` (SFace embeddings, threshold 0.363) and pushes
   appearance events to main.py `/api/face_event`, which handles greetings (throttled) and
@@ -61,13 +70,13 @@ vision.py (:5001) watches the OBS output (NDI) → face recognition (YuNet+SFace
 
 ## Top gotchas (things that will surprise you)
 
-1. **"jim" is rewritten to "Gem"** in every incoming message before processing (main.py:1112) —
+1. **"jim" is rewritten to "Gem"** in every incoming message before processing (main.py:1128) —
    an alternate wake name, not a bug.
 2. **Wake-word gate**: messages that don't contain a wake word (default `["gem", "hey gem",
-   "ok gem"]`, config.py `WAKE_WORDS`) are silently dropped (main.py:1137-1144). Interceptor
-   extractors also strip the wake-word prefix themselves (e.g. main.py:659).
+   "ok gem"]`, config.py `WAKE_WORDS`) are silently dropped (main.py:1159-1167). Interceptor
+   extractors also strip the wake-word prefix themselves (e.g. main.py:626).
 3. **Echo guards**: messages from speakers `gem`/`gem_chadee`/`gem-chadee` are ignored, and any
-   incoming message identical to one of the last 10 AI responses is ignored (main.py:1122-1131).
+   incoming message identical to one of the last 10 AI responses is ignored (main.py:1137-1146).
 4. **Talk animation + music ducking are owned by `watcher_to_face`** (Neurosync process), NOT
    main.py — it watches the TTS output WAV file. main.py only sends OSC `type_1` + the WAV
    duration after sending to chat (main.py:169-180, 234-244).
@@ -93,11 +102,19 @@ vision.py (:5001) watches the OBS output (NDI) → face recognition (YuNet+SFace
     visible in the stream, enroll it too — otherwise it triggers endless "unknown person"
     reports. Face events are flicker-safe (10s grace) and absence-gated (120s) before
     re-reporting.
+12. **Gem Drive `!` commands deliberately bypass the wake-word gate** (main.py:1153-1157).
+    They are inert unless `GAME_DRIVE_ENABLED = True` and the command is in
+    `GAME_DRIVE_COMMANDS`; they never enter chat history, memory, or the LLM. Laya also
+    forwards any `!` message directly (clients/laya_server.py:114).
 
 ## Testing / verification
 
 - `test_ollama.py` — smoke test: can the configured Ollama model chat?
 - `test_ssn_relay.py` — integration test for the local SSN WebSocket relay.
+- `drive_game/tests/test_sim.py` — pure simulation tests (24 tests, no Ursina needed):
+  `conda run -n drive_game python -m pytest drive_game/tests -q`.
+- Gem Drive smoke test: `python -m drive_game --headless --ticks 900`, or run the window and
+  `POST /api/command {"user":"tester","command":"left"}` to `http://127.0.0.1:5010`.
 - No formal test suite. Manual verification: start services from `gui.py` (auto-starts main.py),
   then `GET http://127.0.0.1:5000/health`, `GET /api/status`, or `POST /api/tts` with
   `{"text": "hello"}` to exercise the full speak pipeline.
@@ -117,4 +134,5 @@ vision.py (:5001) watches the OBS output (NDI) → face recognition (YuNet+SFace
   never direct imports across processes.
 - New chat-triggered behavior: add an `is_/extract_` matcher + an interceptor block inside
   `handle_incoming_message()` (before the default LLM path), and document it in
-  Docs/COMMANDS.md.
+  Docs/COMMANDS.md. The one exception is the `!` game-command hook, which runs *before* the
+  wake-word gate by design (main.py:1153).

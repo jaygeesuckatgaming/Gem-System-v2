@@ -6,9 +6,10 @@ Unreal Engine to drive facial expressions and animations.
 """
 
 import asyncio
+import inspect
 import random
 import time
-from typing import Optional, Callable, Awaitable
+from typing import Optional, Callable, Awaitable, Any
 
 
 class IdleManager:
@@ -24,10 +25,13 @@ class IdleManager:
         osc_talk_value: str = "talk_thoughtful",
         osc_idle_value: str = "idle",
         topics: Optional[list] = None,
+        should_suppress: Optional[Callable[..., Any]] = None,
     ):
         self.inactivity_limit = inactivity_limit
         self.cooldown = cooldown
         self.enabled = enabled
+        # Optional predicate: when it returns True, idle monologues are skipped.
+        self.should_suppress = should_suppress
 
         self.osc_state_address = osc_state_address
         self.osc_action_address = osc_action_address
@@ -138,6 +142,17 @@ class IdleManager:
 
             if not self.enabled:
                 continue
+
+            # Suppress idle monologues while something else has the stage
+            # (e.g. the chat-driven game). Keep the timer fresh so a monologue
+            # doesn't fire the instant suppression lifts.
+            if self.should_suppress:
+                suppress = self.should_suppress()
+                if inspect.isawaitable(suppress):
+                    suppress = await suppress
+                if suppress:
+                    self.last_message_time = time.time()
+                    continue
 
             # If the VTuber is currently speaking (monologue or otherwise),
             # keep resetting the inactivity timer so monologues don't pile up.

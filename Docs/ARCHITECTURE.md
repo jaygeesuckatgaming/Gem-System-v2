@@ -3,7 +3,7 @@
 **Audience:** AI coding assistants + maintainer. **Answers:** "what process is that, on what
 port, in which conda env, and how do the pieces connect?"
 
-Last verified: 2026-10-12. Ports/URLs are defaults from `config_example.py` — live values come
+Last verified: 2026-10-20. Ports/URLs are defaults from `config_example.py` — live values come
 from `config.py` (single source of truth, rewritten in place by `save_config()`, main.py:460).
 
 ## 1. System diagram
@@ -30,6 +30,7 @@ flowchart LR
         WT[watcher_to_face.py<br/>Neurosync]
         GPUVIZ[extras/gpu_viz.py<br/>now_playing.py overlays]
         GAME[game_agent.py]
+        DRIVE[drive_game/<br/>Ursina 3D highway<br/>API :5010]
         FACES[models/faces/<br/>YuNet+SFace ONNX<br/>+ enrolled embeddings]
     end
 
@@ -60,6 +61,9 @@ flowchart LR
     SSNR -->|outbound chat| TW
     MAIN -->|music play/duck| OBS
     GAME -->|frames from VIS, OSC moves| UE
+    MAIN -->|forward !drive commands| DRIVE
+    DRIVE -->|crash / leader events<br/>POST /api/game/event| MAIN
+    DRIVE -.->|window captured by OBS| OBS
     GUI -.->|HTTP settings/status + launches .bat files| MAIN
     GUI -.-> COG
     GPUVIZ -.-> OBS
@@ -90,8 +94,50 @@ Unreal avatar there (main.py:2540-2547).
 | **Neurosync: merged_watcher_to_face.py** | `start_merged_watcher_to_face.bat` (`mcp_env_2`) | — (uses Local API internally) | Watches the TTS WAV → audio-to-blendshape transformer → LiveLink → Unreal. **Owns talk animation + ducking timing.** GUI's "Start Neurosync" launches this |
 | **Neurosync: neurosync_local_api.py** | `start_neurosync_localapi.bat` | — | Standalone blendshape API (merged script embeds it) |
 | **game_agent.py** | `start_game_agent.bat` (`mcp_env_2`) | — | Autonomous gameplay experiment: frames from vision → OSC move/turn commands to Unreal. Independent of the chat pipeline |
+| **drive_game** (`drive_game/`) | `start_drive_game.bat` (`drive_game`) | `:5010` API + Ursina window | Chat-driven 3D highway game: up to 12 viewer cars, `!left/!right/!faster/...` commands, wide pack camera, leaderboard. main.py forwards commands and receives crash/leader events for commentary. Disabled unless `GAME_DRIVE_ENABLED = True` |
 | **extras**: gpu_viz.py / now_playing.py / token_usage.py | `start_GPU_Viz.bat` etc. (`mcp_env_2`) | — | OBS overlays: hardware graphs, now-playing (reads `now_playing_state.txt`), token usage. Also spawnable inside the GUI Extras tab |
 | **Unreal Engine** | external | OSC `:10000` (`OSC_IP`/`OSC_PORT`), LiveLink | The avatar. Receives animation commands (strings + bool), talk notifications (address + float duration), idle-state values |
+
+## 2.1 Port reference (quick lookup)
+
+Every listening/outbound port in the system, as verified against `config.py` and the code on
+2026-10-24. The process map above says *why* each exists; this table is the fast lookup.
+Live values come from `config.py` — the defaults below can drift from the comment in
+`config_example.py`.
+
+| Port | Proto | Service | Config key / source |
+|---|---|---|---|
+| **5000** | HTTP | `main.py` MCP/API hub (binds `0.0.0.0` via `SERVER_BIND_HOST`) | `SERVER_PORT`, `MCP_PORT` (config.py:308, :314) |
+| 5001 | HTTP | `vision.py` — `/get_image`, `/scan`, `/faces/*` | hardcoded (vision.py:1012), mirrored by `VISION_*_URL` |
+| 5002 | HTTP | `clients/laya_server.py` pre-filter | hardcoded (clients/laya_server.py:218) |
+| 5010 | HTTP | `drive_game/` API | `GAME_DRIVE_PORT` / `GAME_DRIVE_URL` (config.py:276-277) |
+| 8011 | HTTP | `cognee/cognee_server.py` memory graph | `COGNEE_SERVER_URL` (config.py:32) |
+| 3000 | WS | `ssn_relay.py` — SSN local relay | hardcoded `HOST`/`PORT` (ssn_relay.py:19-20) |
+| 13300 | HTTP | StyleTTS2 (default engine) | `TTS_URL` (config.py:40) + `tts/StyleTTS2/settings.ini` |
+| 13000 | HTTP | VibeVoice | `VIBEVOICE_TTS_URL` (config.py:57); also legacy `Neurosync/NeuroSync_Player/app.py` |
+| 13301 | HTTP | Pocket TTS | `POCKET_TTS_URL` (config.py:54) + `tts/pocket-tts/settings.ini` |
+| 13302 | HTTP | Qwen3-TTS | `QWEN_TTS_URL` (config.py:64) + `tts/Qwen3-TTS/settings.ini` |
+| 9000 | HTTP | Neurosync Local API (`audio_to_blendshapes`) | `NEUROSYNC_LOCAL_URL` (config.py:100) |
+| 13310 | HTTP | Neurosync audio listener (LAN push from main.py; merged watcher listens) | `NEUROSYNC_AUDIO_LISTEN_PORT`, `NEUROSYNC_AUDIO_PUSH_URL` (config.py:50-51) |
+| 8080 | HTTP | `panel.py` NiceGUI control panel (alternative to `gui.py`) | hardcoded (panel.py:150) |
+| 11433 | HTTP | Ollama | `OLLAMA_BASE_URL` (config.py:7) — **code defaults and `config_example.py` say 11434** |
+| 8188 | HTTP | ComfyUI + YuE2 song generation | `MUSIC_GEN_COMFYUI_URL` (config.py:170) |
+| 4096 | HTTP | OpenCode API (`oc ...` commands) | `OPENCODE_API_URL` (config.py:223) |
+| **10000** | **UDP** | OSC to the Unreal avatar (animation commands, talk notices) | `OSC_PORT` (config.py:107) at `OSC_IP` |
+| **11111** | **UDP** | LiveLink to the Unreal avatar (facial blendshapes) | `LIVELINK_PORT` (config.py:112) at `LIVELINK_IP` |
+
+Notes:
+
+- `gui.py` uses Tk and listens on nothing; `clients/listen.py`, `game_agent.py`, and the
+  `extras/*` overlays are portless too.
+- `config.py:179` `LAYA_URL` is `http://127.0.0.1:5000/chat` — that is main.py's **port 5000**
+  (the forwarding destination), not Laya's own 5002.
+- `panel.py:147` iframes `http://localhost:8089/index_1.html`; nothing in this repo serves
+  8089, so it is external/legacy.
+- Legacy, unused Neurosync references in `Neurosync/NeuroSync_Player/config.py`: 5050 (local
+  LLM), 8000 (local TTS), 6969 (transcription), 7070 (embeddings). The merged watcher path
+  does not use them.
+- No OBS WebSocket: music play/duck goes through the local audio stack, not `:4455`.
 
 ## 3. Shared state files
 

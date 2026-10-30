@@ -34,9 +34,11 @@ requires a cognee server restart.
 ## TTS — `clients/tts_client.py` + `tts/*`
 
 Engine-agnostic HTTP POST (`{"chatmessage", "text"}` — both keys for engine compatibility).
-Engine selected by `config.TTS_ENGINE` (`styletts2` | `pocket` | `vibevoice` | `qwen`), URL
-resolved in `_tts_url_for_engine()` (main.py:35-42). The TTS **server** writes
+Engine selected by `config.TTS_ENGINE` (`styletts2` | `pocket` | `vibevoice` | `qwen` | `ming`),
+URL resolved in `_tts_url_for_engine()` (main.py:36-46). The TTS **server** writes
 `tts_output/server_output.wav` (`TTS_OUTPUT_PATH`) — nothing is streamed.
+The NiceGUI TTS page (`panel/tabs/tts_tab.py`) uses per-engine sub-tabs (General /
+StyleTTS2 / Pocket / VibeVoice / Qwen3 / Ming / Test).
 
 - **StyleTTS2** (`:13300`): reference-voice cloning; params `TTS_DIFFUSION_STEPS`,
   `TTS_EMBEDDING_SCALE`, `TTS_ALPHA/BETA`, `TTS_REFERENCE_VOICE` (in `tts/reference_voices/`).
@@ -45,6 +47,17 @@ resolved in `_tts_url_for_engine()` (main.py:35-42). The TTS **server** writes
   (gui.py:3123-3141).
 - **Pocket** (`:13301`), **VibeVoice** (`:13000`), **Qwen3** (`:13302`): alternates; Pocket's
   device/speed live in `tts/pocket-tts/settings.ini` (GUI writes it directly, gui.py:3004-3018).
+- **Ming-3.0-tts-0.5B** (`:13303`, `tts/Ming-3.0-tts/server.py`): 0.5B Qwen2.5-based TTS with
+  a DiT flow head + AudioVAE + Campplus speaker encoder; **44.1 kHz** output. Voice cloning
+  uses a Campplus speaker embedding computed once from
+  `tts/reference_voices/earn_lucky_pitch_minus_one_samplerate_44000_10sec.wav`
+  (cached at `tts/Ming-3.0-tts/reference_voices/earn_lucky_10sec_spk.pt`), so no transcript is
+  needed. Settings in `tts/Ming-3.0-tts/settings.ini`, live-editable via `GET/POST /settings`:
+  `cfg`, `sigma`, `temperature`, `max_length`, `max_decode_steps`, `raw_text`, `trim_silence`,
+  `seed`, `language`, `reference_voice`/`spk_emb_path` (recomputes the speaker embedding),
+  `copy_to`/`copy_enabled`. `device`, `model_path`, and `text_normalization` require a restart;
+  `text_normalization=False` (no pynini). Requires CUDA torch in the `Ming-3.0-tts` env for
+  usable speed (falls back to CPU).
 
 **Consumers of the WAV** (the tricky part): `AudioPlayer` (below) and/or Neurosync
 `watcher_to_face` on this or a second machine (file copied to `TTS_COPY_TO` network share).
@@ -213,6 +226,52 @@ applies `BLENDSHAPE_*_SCALE` intensity sliders, and **owns talk animation + musi
 timing** (not main.py — comments at main.py:149-151, 170-172). GUI's Neurosync tab starts the
 merged pipeline and configures blendshape scales, talk delays, and quick emotes
 (`POST /api/osc/emote`, main.py:2270).
+
+## Gem Drive — `drive_game/` (chat-controlled 3D highway)
+
+Standalone slow-paced driving game where every viewer can own a car. It renders with
+**Ursina/Panda3D** in its own `drive_game` conda env and exposes a stdlib HTTP API on
+**127.0.0.1:5010** (`drive_game/server.py`). Disabled unless `GAME_DRIVE_ENABLED = True`.
+
+- **Simulation** (`drive_game/sim.py`, no Ursina imports): 4 lanes, lane-based steering
+  (no twitch physics), cruise speed 6–22 u/s, `!faster/!slower/!brake`, auto-join, 12-car cap,
+  3-minute inactivity TTL, 2s per-viewer cooldown + 12 commands/s global rate limit. Traffic
+  density is a live preset (`GAME_DRIVE_TRAFFIC_DENSITY`: off/sparse/normal/dense; Games tab
+  applies it without a restart) and spawns ahead and recycles; player-traffic hits crash
+  (5s respawn), player-player proximity
+  auto-brakes. Score = metres + 20/overtake; leaderboard by best run. Rubber-banding nudges
+  stragglers/leaders so the pack stays in frame. `tick()` sub-steps at 50ms so long frames or
+  tests cannot skip collisions.
+- **Render + camera** (`drive_game/app.py`): asset-free cubes/planes. Default camera is a
+  **fixed rig** (`GAME_DRIVE_CAMERA_MODE="fixed"`) at a constant offset/look-at relative to the
+  pack centre (`GAME_DRIVE_CAMERA_OFFSET_*` / `LOOK_*`, Games tab) — no auto-zoom, orbit or
+  switching; `P` pause, `R` reset, `F11` fullscreen. Set mode to `wide` to restore the old
+  auto-zoom pack camera with `F2` chase-leader / `F3` orbit. HUD shows top 5, car count, average
+  speed and crash/leader toasts.
+  World-space `Text` labels use `scale≈24`; colours must be `color.rgb32` (Ursina `color.rgb`
+  takes 0–1 floats and clamps to white).
+- **Custom models**: `GAME_DRIVE_CAR_MODEL`, `GAME_DRIVE_TRAFFIC_MODEL`, and per-viewer
+  files in `models/cars/players/<chatname>.<ext>` (GLB/GLTF/OBJ/BAM). Auto-scaled to
+  `CAR_LENGTH`, auto-yaw for X-long models, colored plate under each player. See
+  [../drive_game/MODELS.md](../drive_game/MODELS.md).
+- **Demo mode**: `DriveSim.set_demo(True, n)` spawns auto-driving `Demo 1…N` cars
+  (panel Games → Demo Mode, or `python -m drive_game --demo --demo-cars 6`).
+  Demo cars leave `GAME_DRIVE_DEMO_RESERVED_SLOTS` (2) grid slots free, and a real
+  viewer's `!join` evicts the least-recently-active demo car if the grid is full.
+  Demo events are flagged `demo` and skipped by the event forwarder/commentary, so
+  model and tuning tests stay silent.
+- **Chat bridge** (`main.py`): `extract_game_command` (main.py:744) matches `!cmd` in
+  `handle_incoming_message` **before** the wake-word gate (main.py:1153) and forwards
+  fire-and-forget to `/api/command`. Commands are not stored in memory or chat history and never
+  reach the LLM. `clients/laya_server.py:114` lets `!` messages bypass the Laya model.
+- **Commentary**: the game POSTs `crash` / `leader` / `milestone` / `session_start` events to
+  `POST /api/game/event` (main.py:2795) → `handle_game_event` (main.py:2953). Throttled by
+  `GAME_DRIVE_COMMENTARY_COOLDOWN_S` (45s), one short LLM line (or canned fallback) through
+  `send_response`, skipped while paused or while AudioPlayer is speaking.
+- **Run it**: `start_scripts/start_drive_game.bat` (env `drive_game`). `python -m drive_game
+  --headless --ticks 900` simulates without a window; `pytest drive_game/tests -q` runs the
+  unit tests. API: `GET /api/state`, `POST /api/command`, `POST /api/control`
+  (`pause|resume|reset|spawn_traffic|force_crash`).
 
 ## Game agent — `game_agent.py`
 

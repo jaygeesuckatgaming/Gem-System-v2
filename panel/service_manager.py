@@ -8,6 +8,7 @@ consoles are detected automatically, and externally started services show
 up as running too.
 """
 
+import asyncio
 import os
 import subprocess
 
@@ -25,11 +26,41 @@ SERVICES = {
         'health': 'http://127.0.0.1:5000/health',
         'port': 5000,
     },
+    'ollama_log': {
+        'title': 'Ollama Log',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_ollama-log.bat'),
+        'health': 'http://127.0.0.1:8089/',
+        'port': 8089,
+    },
+    'cognee': {
+        'title': 'Cognee',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_cognee.bat'),
+        'health': 'http://127.0.0.1:8011/health',
+        'port': 8011,
+    },
     'vision': {
         'title': 'Vision',
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_vision.bat'),
         'health': 'http://127.0.0.1:5001/health',
         'port': 5001,
+    },
+    'laya': {
+        'title': 'Laya',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_laya.bat'),
+        'health': 'http://127.0.0.1:5002/health',
+        'port': 5002,
+    },
+    'drive_game': {
+        'title': 'Gem Drive',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_drive_game.bat'),
+        'health': 'http://127.0.0.1:5010/health',
+        'port': 5010,
+    },
+    'stt': {
+        'title': 'STT',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_listen.bat'),
+        'health': None,   # no HTTP server — tracked by PID liveness only
+        'port': None,
     },
 }
 
@@ -86,8 +117,19 @@ class ServiceManager:
             self.start(name)
 
     def start(self, name):
-        """Launch the service's .bat in its own console window."""
+        """Launch the service's .bat in its own console window.
+
+        Refuses to start a second copy when something already listens on the
+        service's port — several of these apps (ollama-log-proxy, main.py) bind
+        with SO_REUSEADDR, so a duplicate silently "succeeds" and then both
+        processes fight over requests."""
         info = SERVICES[name]
+        port = info.get('port')
+        if port and pids_by_port(port):
+            self.status[name] = True
+            self._refresh_chip(name)
+            ui.notify(f"{info['title']} is already running (port {port})", type='warning')
+            return
         try:
             proc = subprocess.Popen(
                 ['cmd', '/c', info['bat']],
@@ -124,12 +166,42 @@ class ServiceManager:
         self._refresh_chip(name)
 
     async def is_running(self, name):
+        info = SERVICES[name]
+        if info.get('health') is None:
+            # No HTTP endpoint (e.g. the STT listener) — track by PID liveness
+            pid = self.pids.get(name)
+            if pid is None:
+                return False
+            try:
+                import psutil
+                return psutil.pid_exists(pid)
+            except Exception:
+                return False
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                r = await client.get(SERVICES[name]['health'])
-                return r.status_code == 200
+                r = await client.get(info['health'])
+                if r.status_code == 200:
+                    return True
         except Exception:
-            return False
+            pass
+
+        # Fallback: the HTTP endpoint may be busy (e.g. Cognee is loading its
+        # model on first init). If the port is open, the service is running.
+        port = info.get('port')
+        if port:
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection('127.0.0.1', int(port)), timeout=1.0
+                )
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                return True
+            except Exception:
+                pass
+        return False
 
     async def poll_all(self):
         """Health-poll every service and refresh the header chips."""

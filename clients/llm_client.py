@@ -15,6 +15,8 @@ class LLMClient:
         self.base_url = base_url
         self.client = ollama.Client(host=base_url)
         self.enabled = False
+        # None = unknown, True/False once we learn whether the model accepts tools.
+        self.tools_supported = None
 
         # Token usage tracking (cumulative + last request)
         self.prompt_tokens_total = 0
@@ -57,10 +59,10 @@ class LLMClient:
                 messages=[{'role': 'user', 'content': 'Hi'}]
             )
             self.enabled = True
-            print(f"✓ LLM connected: {self.model}")
+            print(f"[LLM] connected: {self.model}")
             return True
         except Exception as e:
-            print(f"✗ LLM connection failed: {e}")
+            print(f"[LLM] connection failed: {e}")
             self.enabled = False
             return False
     
@@ -86,6 +88,11 @@ class LLMClient:
         Returns a tuple of (text_content, tool_calls). tool_calls is a list of
         raw tool-call dicts (each with a 'function' containing 'name'/'arguments').
         """
+        # Some Ollama models (e.g. gemma3) do not support tool calling. Once we
+        # learn that, stay on plain chat instead of failing every message.
+        if tools and self.tools_supported is False:
+            return await self.chat(message, system_prompt), []
+
         try:
             messages = []
             if system_prompt:
@@ -98,12 +105,30 @@ class LLMClient:
 
             response = self.client.chat(**kwargs)
             self.enabled = True
+            if tools:
+                self.tools_supported = True
             self._record_token_usage(response)
             content = response['message'].get('content', '') or ''
             tool_calls = response['message'].get('tool_calls', []) or []
             return content, tool_calls
         except Exception as e:
+            error_text = str(e)
+            if tools and self._tools_unsupported_error(error_text):
+                self.tools_supported = False
+                print(
+                    f"[LLM] {self.model} does not support tools; "
+                    "falling back to plain chat (animations/browse tools disabled).",
+                    flush=True,
+                )
+                return await self.chat(message, system_prompt), []
             return f"Error: {e}", []
+
+    @staticmethod
+    def _tools_unsupported_error(error_text: str) -> bool:
+        lowered = error_text.lower()
+        return 'does not support tools' in lowered or (
+            'tool' in lowered and ('not support' in lowered or 'unsupported' in lowered)
+        )
 
     async def chat_with_image(self, message: str, image_base64: str,
                               system_prompt: Optional[str] = None) -> str:

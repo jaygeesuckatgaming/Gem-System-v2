@@ -4,7 +4,10 @@ Runs in the 'cognee' conda environment
 Main app communicates via HTTP on port 8011
 """
 
+import asyncio
 import os
+import time
+from datetime import datetime
 from pathlib import Path
 
 # Load .env BEFORE importing cognee
@@ -16,7 +19,6 @@ for key in list(os.environ.keys()):
     if "OPENAI" in key:
         del os.environ[key]
 
-import asyncio
 import cognee
 from quart import Quart, request, jsonify
 from quart_cors import cors
@@ -27,18 +29,85 @@ app = cors(app, allow_origin="*")
 initialized = False
 remember_lock = asyncio.Lock()
 
+# ---------------------------------------------------------------------------
+# Off-peak self-improvement schedule.
+# `remember()` below is called with self_improvement=False, so the graph is not
+# rebuilt on every chat message. Instead, cognee.improve() runs as a controlled
+# batch job only during the configured off-peak window.
+# ---------------------------------------------------------------------------
+IMPROVE_SCHEDULER_ENABLED = (
+    os.environ.get("IMPROVE_SCHEDULER_ENABLED", "true").strip().lower() != "false"
+)
+IMPROVE_OFF_PEAK_START = int(os.environ.get("IMPROVE_OFF_PEAK_START", "3"))
+IMPROVE_OFF_PEAK_END = int(os.environ.get("IMPROVE_OFF_PEAK_END", "6"))
+IMPROVE_MIN_INTERVAL_HOURS = float(os.environ.get("IMPROVE_MIN_INTERVAL_HOURS", "24"))
+_last_improve_at = 0.0
+
+# Initialization is slow (loads the LLM + embedding model), so /health must not
+# block on it. Health kicks off init in the background and reports the current
+# state immediately; /remember and /recall still wait for init.
+_initialize_lock = asyncio.Lock()
+_init_task = None
+
 
 async def initialize_cognee():
-    """Initialize Cognee with local Ollama settings"""
+    """Initialize Cognee with local Ollama settings (idempotent, slow)."""
     global initialized
     if initialized:
         return
+    async with _initialize_lock:
+        if initialized:
+            return
+        await cognee.remember("Cognee memory server initialized", self_improvement=False)
+        initialized = True
+        print("✓ Cognee ready", flush=True)
+        print(f"  LLM: {os.environ.get('LLM_MODEL')}", flush=True)
+        print(f"  Embeddings: {os.environ.get('EMBEDDING_MODEL')}", flush=True)
 
-    await cognee.remember("Cognee memory server initialized")
-    initialized = True
-    print("✓ Cognee ready")
-    print(f"  LLM: {os.environ.get('LLM_MODEL')}")
-    print(f"  Embeddings: {os.environ.get('EMBEDDING_MODEL')}")
+        if IMPROVE_SCHEDULER_ENABLED:
+            asyncio.create_task(improve_scheduler())
+
+
+def start_initialization():
+    """Kick off initialization without blocking the caller (used by /health)."""
+    global _init_task
+    if initialized:
+        return
+    if _init_task is None or _init_task.done():
+        _init_task = asyncio.create_task(initialize_cognee())
+
+
+def _in_off_peak_window(now: datetime) -> bool:
+    hour = now.hour
+    if IMPROVE_OFF_PEAK_START <= IMPROVE_OFF_PEAK_END:
+        return IMPROVE_OFF_PEAK_START <= hour < IMPROVE_OFF_PEAK_END
+    # Window wraps past midnight (e.g. start=22, end=4)
+    return hour >= IMPROVE_OFF_PEAK_START or hour < IMPROVE_OFF_PEAK_END
+
+
+async def run_improve():
+    """Run a controlled batch self-improvement (serialized with remembers)."""
+    global _last_improve_at
+    print("🧠 Running scheduled Cognee self-improvement (off-peak batch)...", flush=True)
+    async with remember_lock:
+        await cognee.improve(dataset="main_dataset")
+    _last_improve_at = time.time()
+    print("✓ Cognee self-improvement complete", flush=True)
+
+
+async def improve_scheduler():
+    """Background loop that runs improve() once per interval during off-peak hours."""
+    while True:
+        try:
+            await asyncio.sleep(60)
+            if not _in_off_peak_window(datetime.now()):
+                continue
+            if time.time() - _last_improve_at < IMPROVE_MIN_INTERVAL_HOURS * 3600:
+                continue
+            await run_improve()
+        except Exception as exc:
+            print(f"[ImproveScheduler] error: {exc}", flush=True)
+            await asyncio.sleep(300)
 
 
 def serialize_results(results):
@@ -68,11 +137,13 @@ async def remember():
 
         formatted = f"[{source}] {speaker}: {text}"
 
-        # Serialize remember operations so they don't pile up
+        # Serialize remember operations so they don't pile up.
+        # self_improvement=False: don't rebuild the graph after every message;
+        # the graph is improved in a scheduled batch instead (see improve_scheduler).
         async with remember_lock:
             if session_id:
-                await cognee.remember(formatted, session_id=session_id)
-            await cognee.remember(formatted)
+                await cognee.remember(formatted, session_id=session_id, self_improvement=False)
+            await cognee.remember(formatted, self_improvement=False)
 
         return jsonify({"status": "ok", "message": "Remembered"})
     except Exception as e:
@@ -109,15 +180,21 @@ async def recall():
         return jsonify({"status": "error", "error": str(e)}), 500
 
 
+@app.route('/improve', methods=['POST'])
+async def improve_endpoint():
+    """Manually run a batch self-improvement (same job as the off-peak scheduler)."""
+    try:
+        await initialize_cognee()
+        await run_improve()
+        return jsonify({"status": "ok", "message": "Self-improvement complete"})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
 @app.route('/health', methods=['GET'])
 async def health():
-    """Health check with auto-initialization"""
-    global initialized
-    if not initialized:
-        try:
-            await initialize_cognee()
-        except Exception as e:
-            return jsonify({"status": "error", "initialized": False, "error": str(e)}), 500
+    """Fast health check; initialization runs in the background."""
+    start_initialization()
     return jsonify({"status": "ok", "initialized": initialized})
 
 
@@ -135,7 +212,11 @@ async def get_settings():
         'data_root_directory': os.environ.get('DATA_ROOT_DIRECTORY', ''),
         'system_root_directory': os.environ.get('SYSTEM_ROOT_DIRECTORY', ''),
         'caching': os.environ.get('CACHING', ''),
-        'auto_feedback': os.environ.get('AUTO_FEEDBACK', '')
+        'auto_feedback': os.environ.get('AUTO_FEEDBACK', ''),
+        'improve_scheduler_enabled': IMPROVE_SCHEDULER_ENABLED,
+        'improve_off_peak_start': IMPROVE_OFF_PEAK_START,
+        'improve_off_peak_end': IMPROVE_OFF_PEAK_END,
+        'improve_min_interval_hours': IMPROVE_MIN_INTERVAL_HOURS,
     })
 
 
@@ -157,7 +238,11 @@ async def update_settings():
         'EMBEDDING_ENDPOINT': data.get('embedding_endpoint'),
         'EMBEDDING_DIMENSIONS': data.get('embedding_dimensions'),
         'CACHING': data.get('caching'),
-        'AUTO_FEEDBACK': data.get('auto_feedback')
+        'AUTO_FEEDBACK': data.get('auto_feedback'),
+        'IMPROVE_SCHEDULER_ENABLED': data.get('improve_scheduler_enabled'),
+        'IMPROVE_OFF_PEAK_START': data.get('improve_off_peak_start'),
+        'IMPROVE_OFF_PEAK_END': data.get('improve_off_peak_end'),
+        'IMPROVE_MIN_INTERVAL_HOURS': data.get('improve_min_interval_hours'),
     }
     
     # Update existing lines or add new ones

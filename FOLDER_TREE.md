@@ -54,6 +54,17 @@ Gem-System-v2/
 ├── cognee_system/                 # Cognee system databases (gitignored)
 │   └── databases/
 │
+├── drive_game/                    # Chat-driven 3D highway game (Ursina, own env)
+│   ├── __main__.py                # Entry point (windowed / --headless)
+│   ├── app.py                     # Ursina renderer, HUD, wide pack camera
+│   ├── assets.py                  # Model path/scale helpers
+│   ├── MODELS.md                  # Custom car model guide
+│   ├── sim.py                     # Pure-Python simulation (testable, no Ursina)
+│   ├── server.py                  # Local HTTP API (:5010)
+│   ├── tuning.py                  # Gameplay constants
+│   ├── requirements.txt           # ursina / httpx / pytest
+│   └── tests/test_sim.py
+│
 ├── tts/                           # Text-to-speech engines
 │   ├── pocket-tts/                # Pocket TTS (submodule)
 │   ├── StyleTTS2/                 # StyleTTS2 (submodule)
@@ -69,6 +80,7 @@ Gem-System-v2/
 │
 └── start_scripts/                 # Launcher batch scripts
     ├── start_cognee.bat
+    ├── start_drive_game.bat
     ├── start_gui.bat
     ├── start_listen.bat
     ├── start_mcp.bat

@@ -32,7 +32,7 @@ COUNTDOWN_CHUNK_DELAY_S = 3.0  # wait between chunks so each plays before overwr
 # Cognee Memory
 COGNEE_SERVER_URL = "http://127.0.0.1:8011"
 
-# TTS Engine Selection: "styletts2", "pocket", or "vibevoice"
+# TTS Engine Selection: "styletts2", "pocket", "vibevoice", "qwen", "ming", or "audio8"
 TTS_ENGINE = "styletts2"
 
 # StyleTTS2
@@ -63,6 +63,12 @@ VIBEVOICE_CFG_SCALE = 1.3
 
 # Qwen3-TTS
 QWEN_TTS_URL = "http://127.0.0.1:13302/tts"
+
+# Ming-3.0-tts (tts/Ming-3.0-tts/server.py)
+MING_TTS_URL = 'http://127.0.0.1:13303/tts'
+
+# Audio8-TTS (tts/Audio8_TTS/server.py)
+AUDIO8_TTS_URL = 'http://127.0.0.1:13304/tts'
 
 # Audio Player (plays TTS output when not using Neurosync)
 AUDIO_PLAYER_ENABLED = True
@@ -107,6 +113,17 @@ OSC_ENABLED = True
 OSC_IP = "127.0.0.1"
 OSC_PORT = 10000
 OSC_ADDRESS = "/chat/message"
+
+# OSC receiver (Unreal Engine -> Gem-System). UDP socket bound by main.py.
+OSC_RECEIVE_IP = "0.0.0.0"
+OSC_RECEIVE_PORT = 9000
+OSC_RECEIVE_VERBOSE = True
+
+# Isometric Unreal game OSC commands (exact chat phrase -> address/value)
+ISO_GAME_ENABLED = False
+ISO_OSC_IP = OSC_IP
+ISO_OSC_PORT = OSC_PORT
+ISO_OSC_ACTIONS = []
 
 # LiveLink (Unreal Engine facial animation)
 LIVELINK_IP = "127.0.0.1"
@@ -168,6 +185,9 @@ MUSIC_GEN_TEXT_NODE_ID = '22'
 
 # Laya Fast-Lane Pre-Filter (classifies chat + sends OSC body cues before the LLM)
 LAYA_ENABLED = True
+# Load the Laya classifier model at startup. When False (or when the model
+# cannot load), Laya runs in pass-through mode: all messages go to main.py.
+LAYA_LOAD_MODEL = True
 LAYA_URL = "http://127.0.0.1:5000/chat"   # Main server endpoint to forward approved messages to
 LAYA_ANIMATION_THRESHOLD = 0.75           # Confidence needed to send a non-idle OSC cue
 LAYA_REPLY_THRESHOLD = 0.70               # Probability needed to forward a message to the LLM
@@ -260,6 +280,41 @@ GAME_AGENT_SYSTEM_PROMPT = (
     "MOVE: <forward|back|stop>  TURN: <left|right|stop>\n"
     "Choose based on what would let the character walk around and avoid obstacles."
 )
+
+# Gem Drive (chat-controlled 3D highway game, see drive_game/)
+# Commands are short (!left, !join) and bypass the wake-word gate when enabled.
+GAME_DRIVE_ENABLED = False
+GAME_DRIVE_SUPPRESS_IDLE = True   # pause idle monologues while the game is running
+GAME_DRIVE_HOST = "127.0.0.1"
+GAME_DRIVE_PORT = 5010
+GAME_DRIVE_URL = "http://127.0.0.1:5010"
+GAME_DRIVE_EVENT_URL = "http://127.0.0.1:5000/api/game/event"
+GAME_DRIVE_MAX_CARS = 12
+GAME_DRIVE_DEMO_RESERVED_SLOTS = 2   # keep free for real viewers when demo mode is on
+GAME_DRIVE_CAR_TTL_S = 180
+GAME_DRIVE_COMMAND_COOLDOWN_S = 2.0
+GAME_DRIVE_TRAFFIC_DENSITY = "sparse"   # off | sparse | normal | dense
+# Camera: "fixed" = constant offset/angle that follows the pack (no zoom/orbit).
+# "wide" = old auto-zoom camera. Offsets are relative to the pack centre.
+GAME_DRIVE_CAMERA_MODE = "fixed"
+GAME_DRIVE_CAMERA_OFFSET_X = 0.0
+GAME_DRIVE_CAMERA_OFFSET_Y = 32.0
+GAME_DRIVE_CAMERA_OFFSET_Z = -100.0
+GAME_DRIVE_CAMERA_LOOK_X = 0.0
+GAME_DRIVE_CAMERA_LOOK_Y = 1.0
+GAME_DRIVE_CAMERA_LOOK_Z = 30.0
+GAME_DRIVE_COMMANDS = ["left", "right", "faster", "slower", "brake", "join", "leave", "score"]
+GAME_DRIVE_COMMENTARY_ENABLED = True
+GAME_DRIVE_COMMENTARY_COOLDOWN_S = 45
+GAME_DRIVE_COMMENTARY_USE_LLM = True
+# Custom models (GLB/GLTF/OBJ/BAM; export .blend to GLB first). Paths are
+# relative to the project root. Empty = use the built-in cube car.
+GAME_DRIVE_CAR_MODEL = ""
+GAME_DRIVE_TRAFFIC_MODEL = ""
+GAME_DRIVE_PLAYER_MODEL_DIR = "models/cars/players"
+GAME_DRIVE_MODEL_SCALE = 0.0   # 0 = auto-fit longest side to CAR_LENGTH (4.2)
+GAME_DRIVE_MODEL_YAW = 0.0     # extra rotation in degrees (0 = auto-detect X-long models)
+GAME_DRIVE_MODEL_Y_OFFSET = 0.0
 
 # Server
 SERVER_HOST = "127.0.0.1"
