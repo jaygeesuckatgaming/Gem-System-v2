@@ -14,7 +14,7 @@ import os
 import httpx
 from nicegui import ui
 
-from panel import settings_store
+from panel import m8_audio_sync, settings_store
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MIN_DB = -60.0
@@ -283,6 +283,16 @@ def create(sm):
             'AUDIO_DUCK_HOLD_S': round(float(duck_hold.value), 1),
         }
         file_ok, pushed = await asyncio.to_thread(settings_store.save, values)
+        # Keep the m8 companion on the same input/output devices.
+        m8_synced = None
+        try:
+            m8_synced = await asyncio.to_thread(
+                m8_audio_sync.apply,
+                values['AUDIO_INPUT_DEVICE'],
+                values['AUDIO_OUTPUT_DEVICE'],
+            )
+        except Exception as exc:
+            ui.notify(f'm8 audio sync failed: {exc}', type='warning')
         # Input device has a dedicated endpoint on main.py
         input_pushed = False
         if await sm.is_running('mcp'):
@@ -295,8 +305,12 @@ def create(sm):
                 pass
         if file_ok:
             names = list(pushed.keys()) + (['input_device'] if input_pushed else [])
-            ui.notify(f'Saved to config.py (pushed live to: {", ".join(names) or "no running services"})',
-                      type='positive')
+            m8_note = ''
+            if m8_synced:
+                m8_note = (f'; m8 mic: {m8_synced["input"].split(" (")[0]}, '
+                           f'game out: {m8_synced["output"].split(" (")[0]} — restart m8 and the game')
+            ui.notify(f'Saved to config.py (pushed live to: {", ".join(names) or "no running services"})'
+                      + m8_note, type='positive')
         else:
             ui.notify('Failed to write config.py', type='negative')
     ui.button('Save audio settings', icon='save', on_click=save).classes('mt-2')

@@ -17,6 +17,10 @@ from nicegui import ui
 
 CREATE_NEW_CONSOLE = 0x00000010
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The chasm checkout lives outside this project; override with CHASM_ROOT.
+CHASM_ROOT = os.environ.get('CHASM_ROOT', r'C:\Users\jayge\Documents\AI\chasm')
+# m8 (Kev/Laya companion) lives beside the project; override with M8_ROOT.
+M8_ROOT = os.environ.get('M8_ROOT', r'C:\Users\jayge\Documents\AI\m8')
 
 # Registry — grows as tabs migrate to the new panel
 SERVICES = {
@@ -55,6 +59,36 @@ SERVICES = {
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_drive_game.bat'),
         'health': 'http://127.0.0.1:5010/health',
         'port': 5010,
+    },
+    'chasm': {
+        'title': 'chasm',
+        'bat': os.path.join(CHASM_ROOT, 'start-chasm.bat'),
+        'health': 'http://127.0.0.1:7341/health',
+        'port': 7341,
+    },
+    'styletts2': {
+        'title': 'StyleTTS2',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_styletts2.bat'),
+        'health': 'http://127.0.0.1:13300/settings',
+        'port': 13300,
+    },
+    'whisper': {
+        'title': 'Whisper STT',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_whisper_server.bat'),
+        'health': 'http://127.0.0.1:13310/health',
+        'port': 13310,
+    },
+    'm8_tts': {
+        'title': 'm8 TTS',
+        'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_m8_styletts2.bat'),
+        'health': 'http://127.0.0.1:8091/health',
+        'port': 8091,
+    },
+    'm8': {
+        'title': 'm8',
+        'bat': os.path.join(M8_ROOT, 'start-m8.bat'),
+        'health': 'http://127.0.0.1:8090/',
+        'port': 8090,
     },
     'stt': {
         'title': 'STT',

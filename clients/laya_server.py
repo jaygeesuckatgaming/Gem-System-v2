@@ -18,8 +18,10 @@ Binds port 5002 (separate from main.py's 5000).
 import os
 os.environ["USE_TF"] = "0"
 
+import asyncio
 import sys
 import io
+import threading
 # Add the project root to sys.path so `import config` works when run directly
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -46,6 +48,8 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "laya")
 
 _laya_agent = None
 _laya_load_attempted = False
+# Laya's model is one instance; m8 and the chat pre-filter share it.
+_laya_predict_lock = threading.Lock()
 
 
 def _load_laya():
@@ -212,6 +216,49 @@ async def _forward_to_main(chatter_name: str, chat_message: str):
             print(f"Forward to main server: HTTP {resp.status_code}", flush=True)
     except Exception as e:
         print(f"Forward to main server failed: {type(e).__name__}: {e}", flush=True)
+
+
+# ---------------------------------------------------------------------------
+# m8 decision endpoint (Kev-compatible)
+# ---------------------------------------------------------------------------
+# m8's decision model is normally llama.cpp's /v1/systemone; this serves Laya's
+# choice/score/noul answers in the same shape, so m8 uses Laya instead of Kev.
+@app.route("/v1/systemone", methods=["POST"])
+async def systemone():
+    payload = await request.get_json()
+    if not payload:
+        return jsonify({"error": "no payload"}), 400
+
+    questions = payload.get("questions")
+    if not isinstance(questions, dict) or not questions:
+        return jsonify({"error": "questions must be a non-empty object"}), 400
+
+    state = payload.get("state", "")
+    if isinstance(state, str):
+        # Laya's encoder is small; keep the recent situation and the action list
+        # (both m8 put near the end) rather than the oldest feed lines.
+        inputs = {"text": state[-3000:]}
+    else:
+        inputs = state
+
+    laya_agent = _load_laya()
+    if laya_agent is None:
+        return jsonify({"error": "Laya model is not loaded"}), 503
+
+    def _predict():
+        with _laya_predict_lock:
+            return laya_agent.predict(inputs, questions)
+
+    try:
+        result = await asyncio.to_thread(_predict)
+    except Exception as e:
+        print(f"Laya systemone error: {e}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({
+        "answers": result.get("answers", {}),
+        "usage": result.get("usage"),
+    })
 
 
 @app.route("/health", methods=["GET"])
