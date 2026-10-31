@@ -106,3 +106,7 @@ tts/StyleTTS2_Chat_Reader/
 
 # Stray console dump
 extras/onviffiles
+
+# Disc images / game data
+*.iso
+*.xiso
