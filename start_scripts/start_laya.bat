@@ -1,5 +1,5 @@
 @echo off
-TITLE Laya Fast-Lane
+TITLE Laya Decision Server
 set PYTHONUTF8=1
 cd C:\Users\jayge\Documents\AI\Gem-System-v2
 call C:\Users\jayge\miniconda3\Scripts\activate.bat
