@@ -902,6 +902,15 @@ def _m8_kevin_tab(sm):
         'it, Whisper hears you, and the m8-patched OpenCE gives Kevin his body.'
     ).classes('text-sm text-slate-400 max-w-3xl')
 
+    with ui.card().classes('w-full'):
+        with ui.row().classes('w-full items-center justify-between'):
+            ui.label('Kev / Kevin control panel').classes('text-lg font-bold')
+            ui.link('open in a new tab', 'http://127.0.0.1:8090', new_tab=True)
+        ui.element('iframe').props(
+            'src="http://127.0.0.1:8090/" '
+            'sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation"'
+        ).classes('w-full h-[70vh] rounded-lg border-0 bg-slate-950')
+
     tiles = {}
     with ui.card().classes('w-full'):
         with ui.row().classes('w-full items-center justify-between'):
