@@ -156,4 +156,5 @@ def current() -> dict:
         "input": read_section_value(M8_TOML, "mic", "device"),
         "output": read_section_value(HALO_CONFIG, "audio", "output_device"),
         "model": read_section_value(M8_TOML, "llm", "model"),
+        "vision": read_section_value(M8_TOML, "llm", "vision_model"),
     }

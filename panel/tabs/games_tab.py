@@ -924,6 +924,7 @@ def _m8_kevin_tab(sm):
                 ('mic', 'Microphone'),
                 ('out', 'Game output'),
                 ('model', 'Dialogue model'),
+                ('vision', 'Vision model'),
             ):
                 with ui.card().classes('bg-slate-800 px-4 py-2 min-w-[220px]'):
                     ui.label(title).classes('text-xs text-slate-400')
@@ -952,6 +953,7 @@ def _m8_kevin_tab(sm):
             tiles['mic'].text = current.get('input') or '-'
             tiles['out'].text = current.get('output') or '-'
             tiles['model'].text = current.get('model') or '-'
+            tiles['vision'].text = (current.get('vision') or current.get('model') or '-')
 
             ready = all(states.values()) and game_running
             overall.text = 'READY' if ready else 'ATTENTION'
@@ -1016,8 +1018,16 @@ def _m8_kevin_tab(sm):
         ui.timer(2.0, refresh, immediate=True)
 
     with ui.card().classes('w-full'):
-        ui.label('Dialogue model').classes('text-lg font-bold')
-        model_select = ui.select({}, label='Ollama model', with_input=True).classes('w-full max-w-md')
+        ui.label('Models').classes('text-lg font-bold')
+        model_select = ui.select({}, label='Dialogue model', with_input=True).classes('w-full max-w-md')
+        vision_select = ui.select(
+            {'': '(same as dialogue)'},
+            label='Vision model for look (needs image support)',
+            with_input=True,
+        ).classes('w-full max-w-md')
+        ui.label(
+            'The vision model is used only for Kevin’s look; blank falls back to the dialogue model.'
+        ).classes('text-xs text-slate-500')
 
         async def load_models():
             try:
@@ -1025,34 +1035,46 @@ def _m8_kevin_tab(sm):
                     response = await client.get(f'{OLLAMA_URL}/api/tags')
                 names = sorted({model['name'] for model in response.json().get('models', [])})
                 model_select.options = {name: name for name in names}
-                current = m8_audio_sync.current().get('model')
-                model_select.value = current if current in names else (names[0] if names else None)
+                vision_select.options = {'': '(same as dialogue)', **{name: name for name in names}}
+                current = m8_audio_sync.current()
+                dialogue = current.get('model')
+                vision = current.get('vision') or ''
+                model_select.value = dialogue if dialogue in names else (names[0] if names else None)
+                vision_select.value = vision if vision in names else ''
                 ui.notify(f'{len(names)} Ollama model(s)')
             except Exception as exc:
                 ui.notify(f'Could not list Ollama models: {exc}', type='negative')
 
         async def restart_m8():
+            # (runs as a background task: no UI updates here; the refresh timer does that)
             sm.stop('m8')
             await asyncio.sleep(1.0)
             sm.start('m8')
-            await asyncio.sleep(1.5)
-            await refresh()
 
-        def save_model(restart: bool):
-            model = model_select.value
-            if not model:
+        async def save_model(restart: bool):
+            dialogue = model_select.value
+            vision = vision_select.value or ''
+            if not dialogue:
                 return
-            m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'model', model)
-            ui.notify(f'Saved dialogue model {model}' + (
+            m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'model', dialogue)
+            m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'vision_model', vision)
+            detail = f'vision {vision}' if vision else 'vision uses the dialogue model'
+            ui.notify(f'Saved dialogue {dialogue}; {detail}' + (
                 '; restarting m8' if restart else '; restart m8 to apply'))
             if restart:
-                asyncio.create_task(restart_m8())
+                await restart_m8()
+
+        async def save_models_only():
+            await save_model(False)
+
+        async def save_models_restart():
+            await save_model(True)
 
         with ui.row().classes('gap-2 items-center flex-wrap'):
             ui.button('Refresh models', icon='refresh', on_click=load_models).props('flat')
-            ui.button('Save model', icon='save', on_click=lambda: save_model(False)).props('flat')
+            ui.button('Save models', icon='save', on_click=save_models_only).props('flat')
             ui.button('Save + restart m8', icon='restart_alt',
-                      on_click=lambda: save_model(True))
+                      on_click=save_models_restart)
             ui.timer(0.2, load_models, once=True)
 
     with ui.card().classes('w-full'):
