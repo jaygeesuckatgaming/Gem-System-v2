@@ -221,6 +221,7 @@ def current() -> dict:
         "model": read_section_value(M8_TOML, "llm", "model"),
         "vision": read_section_value(M8_TOML, "llm", "vision_model"),
         "url": read_section_value(M8_TOML, "llm", "url"),
+        "max_tokens": read_section_literal(M8_TOML, "llm", "max_tokens") or "200",
         "name": companion_name(),
         "memory_enabled": memory["enabled"],
         "memory_url": memory["url"],

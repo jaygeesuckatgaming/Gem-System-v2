@@ -891,6 +891,16 @@ def _m8_gem_tab(sm):
             'The vision model is used only for Gem’s look; blank falls back to the dialogue model.'
         ).classes('text-xs text-slate-500')
 
+        reply_input = ui.number(
+            'Reply length (tokens)',
+            value=float(m8_audio_sync.current().get('max_tokens') or 200),
+            min=20, max=1000, step=10,
+        ).classes('w-full max-w-md')
+        ui.label(
+            'The longest a spoken line may get (about 3-4 characters a token). Too low cuts '
+            'the voice off mid-word; 200 is a long paragraph. Restart m8 to apply.'
+        ).classes('text-xs text-slate-500')
+
         async def load_models():
             base = base_from_url(base_input.value)
             try:
@@ -924,8 +934,11 @@ def _m8_gem_tab(sm):
                                             f'{base}/v1/chat/completions')
             m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'model', dialogue)
             m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'vision_model', vision)
+            reply_tokens = max(20, min(1000, int(reply_input.value or 200)))
+            m8_audio_sync.set_section_literal(m8_audio_sync.M8_TOML, 'llm', 'max_tokens',
+                                              str(reply_tokens))
             detail = f'vision {vision}' if vision else 'vision uses the dialogue model'
-            ui.notify(f'Saved {base} · dialogue {dialogue}; {detail}' + (
+            ui.notify(f'Saved {base} · dialogue {dialogue} · reply ≤{reply_tokens} tokens; {detail}' + (
                 '; restarting m8' if restart else '; restart m8 to apply'))
             if restart:
                 await restart_m8()
