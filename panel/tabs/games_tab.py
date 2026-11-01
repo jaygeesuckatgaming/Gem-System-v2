@@ -944,6 +944,57 @@ def _m8_gem_tab(sm):
             ui.timer(0.2, load_models, once=True)
 
     with ui.card().classes('w-full'):
+        ui.label('Memory').classes('text-lg font-bold')
+        memory = m8_audio_sync.memory_settings()
+        memory_status = ui.label('Cognee: checking…').classes('text-sm text-slate-400')
+        source = memory['source']
+        ui.label(
+            'm8 writes each play session to the same Cognee memory the stream uses '
+            f'(entries read "[{source}] Gem: …"), and recalls past sessions at the '
+            'start of a game. Restart m8 to apply a change.'
+        ).classes('text-xs text-slate-500')
+        memory_switch = ui.switch('Remember play sessions', value=memory['enabled'])
+        memory_hits = ui.label('').classes('text-xs text-slate-400 whitespace-pre-wrap')
+
+        async def check_memory():
+            try:
+                async with httpx.AsyncClient(timeout=4.0) as client:
+                    response = await client.get(f"{memory['url'].rstrip('/')}/health")
+                ok = response.status_code == 200
+                memory_status.text = f"Cognee: {response.status_code}"
+                memory_status.classes(replace='text-sm ' + (
+                    'text-green-400' if ok else 'text-orange-400'))
+            except Exception:
+                memory_status.text = f"Cognee: unreachable ({memory['url']})"
+                memory_status.classes(replace='text-sm text-red-400')
+
+        def save_memory():
+            result = m8_audio_sync.set_memory_enabled(bool(memory_switch.value))
+            ui.notify(('Memory on' if result['enabled'] else 'Memory off')
+                      + '; restart m8 to apply')
+
+        async def test_recall():
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{memory['url'].rstrip('/')}/recall",
+                        json={'query': 'Gem played Halo', 'top_k': 5},
+                    )
+                results = response.json().get('results', [])
+            except Exception as exc:
+                ui.notify(f'Recall failed: {exc}', type='negative')
+                return
+            ui.notify(f'{len(results)} memory line(s)')
+            memory_hits.text = ('\n'.join(f'• {item}' for item in results[:4])
+                                if results else '(nothing about Halo yet)')
+
+        with ui.row().classes('gap-2 items-center flex-wrap'):
+            ui.button('Check Cognee', icon='refresh', on_click=check_memory).props('flat')
+            ui.button('Save', icon='save', on_click=save_memory).props('flat')
+            ui.button('Test recall', icon='search', on_click=test_recall).props('flat')
+        ui.timer(8.0, check_memory, immediate=True)
+
+    with ui.card().classes('w-full'):
         ui.label('Audio devices').classes('text-lg font-bold')
         audio_label = ui.label().classes('text-sm text-slate-300')
 

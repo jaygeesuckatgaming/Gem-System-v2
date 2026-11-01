@@ -88,7 +88,7 @@ def _escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
-def set_section_value(path: Path, section: str, key: str, value: str) -> None:
+def _set_line(path: Path, section: str, key: str, rendered: str) -> None:
     """Line-based TOML update that keeps the file's comments and other keys."""
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     start = next((i for i, line in enumerate(lines) if line.strip() == f"[{section}]"), None)
@@ -97,7 +97,7 @@ def set_section_value(path: Path, section: str, key: str, value: str) -> None:
         if lines and lines[-1].strip():
             lines.append("")
         lines.append(f"[{section}]")
-        lines.append(f'{key} = "{_escape(value)}"')
+        lines.append(f"{key} = {rendered}")
     else:
         end = len(lines)
         for i in range(start + 1, len(lines)):
@@ -106,13 +106,22 @@ def set_section_value(path: Path, section: str, key: str, value: str) -> None:
                 break
         for i in range(start + 1, end):
             if re.match(rf"\s*{re.escape(key)}\s*=", lines[i]):
-                lines[i] = f'{key} = "{_escape(value)}"'
+                lines[i] = f"{key} = {rendered}"
                 break
         else:
-            lines.insert(start + 1, f'{key} = "{_escape(value)}"')
+            lines.insert(start + 1, f"{key} = {rendered}")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def set_section_value(path: Path, section: str, key: str, value: str) -> None:
+    _set_line(path, section, key, f'"{_escape(value)}"')
+
+
+def set_section_literal(path: Path, section: str, key: str, literal: str) -> None:
+    """Writes a TOML literal (true/false, a number) rather than a quoted string."""
+    _set_line(path, section, key, literal)
 
 
 def read_section_value(path: Path, section: str, key: str) -> str:
@@ -131,6 +140,43 @@ def read_section_value(path: Path, section: str, key: str) -> str:
             if match:
                 return match.group(1)
     return ""
+
+
+def read_section_literal(path: Path, section: str, key: str) -> str:
+    """The raw text of an unquoted TOML value (true, false, 30), or ""."""
+    if not path.exists():
+        return ""
+    in_section = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped == f"[{section}]":
+            in_section = True
+            continue
+        if in_section and stripped.startswith("["):
+            break
+        if in_section:
+            match = re.match(rf"\s*{re.escape(key)}\s*=\s*([^#\s]+)", line)
+            if match:
+                return match.group(1)
+    return ""
+
+
+COGNEE_URL = "http://127.0.0.1:8011"
+
+
+def memory_settings() -> dict:
+    """The m8.toml [memory] block, the shared Cognee memory between games."""
+    enabled = read_section_literal(M8_TOML, "memory", "enabled").lower()
+    return {
+        "enabled": enabled not in ("false", "0", "no"),
+        "url": read_section_value(M8_TOML, "memory", "url") or COGNEE_URL,
+        "source": read_section_value(M8_TOML, "memory", "source") or "halo",
+    }
+
+
+def set_memory_enabled(enabled: bool) -> dict:
+    set_section_literal(M8_TOML, "memory", "enabled", "true" if enabled else "false")
+    return memory_settings()
 
 
 DEFAULT_NAME = "Gem"
@@ -168,6 +214,7 @@ def apply(stored_input: str, stored_output: str) -> dict:
 
 
 def current() -> dict:
+    memory = memory_settings()
     return {
         "input": read_section_value(M8_TOML, "mic", "device"),
         "output": read_section_value(HALO_CONFIG, "audio", "output_device"),
@@ -175,4 +222,6 @@ def current() -> dict:
         "vision": read_section_value(M8_TOML, "llm", "vision_model"),
         "url": read_section_value(M8_TOML, "llm", "url"),
         "name": companion_name(),
+        "memory_enabled": memory["enabled"],
+        "memory_url": memory["url"],
     }

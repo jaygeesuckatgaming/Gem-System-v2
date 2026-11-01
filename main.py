@@ -1734,6 +1734,14 @@ async def get_memory_context(speaker: str, message: str) -> str:
                     memory_context += f"\n\nThings you remember about {term}:"
                     for result in entity_results:
                         memory_context += f"\n- {result}"
+
+            # 3. Games: the in-game Gem writes its Halo sessions to this same memory
+            game_results = await cognee.recall(
+                f"times Gem played Halo with {speaker}, what happened", top_k=3)
+            if game_results:
+                memory_context += f"\n\nTimes you played Halo with {speaker}:"
+                for result in game_results:
+                    memory_context += f"\n- {result}"
     except (asyncio.TimeoutError, Exception):
         print("⏱️ Memory recall timed out, proceeding without context")
     

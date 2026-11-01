@@ -25,11 +25,20 @@ Instantiated at main.py:32; model swap at runtime via GUI settings.
 Cognee (knowledge-graph memory) behind an HTTP server on `:8011`. `remember()` is
 **fire-and-forget** (`asyncio.create_task`, clients/cognee_client.py:30) so chat is never
 blocked; `recall()` has a 5s client timeout, and main.py wraps recall with a 3s overall budget
-(`get_memory_context`, main.py:1570-1628, with 3-tier fallback queries). Every user message,
+(`get_memory_context`, main.py:1682, with 3-tier fallback queries). Every user message,
 AI response, and notable action (song downloaded/generated, music stopped, face appearances) is
 stored. The server serializes writes behind an asyncio lock and queries session memory first,
 then the global graph. Its `POST /settings` rewrites the cognee `.env` (LLM/embedding provider) —
 requires a cognee server restart.
+
+**The in-game Gem shares this memory.** m8 (`[memory]` in `m8.toml`) writes under
+`source = "halo"`: a session-start line, the game's notable events (kills, shields, deaths,
+pickups, objectives, story lines) batched into one entry every `flush_seconds` (30), each level
+reached at a checkpoint, and a closing summary when the game disconnects. On game connect it
+recalls past sessions and what it knows about the player, and puts both in the prompt. Chat-Gem
+gets Halo back through `get_memory_context`, which asks `"times Gem played Halo with {speaker}"`.
+Entries are persisted in `cognee_data/` + `cognee_system/databases/` (no `session_id`, so the
+global graph); the m8 tab's **Memory** card shows Cognee's health and can test a recall.
 
 ## TTS — `clients/tts_client.py` + `tts/*`
 

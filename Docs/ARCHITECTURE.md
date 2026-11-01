@@ -200,6 +200,7 @@ close browser. Everything else dies with its console window.
 | `clients/whisper_server.py` | **13310** | STT for the mic |
 | `clients/laya_server.py` | **5002** | `[kev]` decision model (`/v1/systemone`) |
 | Ollama | **11434** | `[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat` |
+| `cognee/cognee_server.py` | **8011** | `[memory]` shared Cognee memory (sessions, player) |
 | `AI-clean/voice_player.py` | — | plays `tts_output/server_output.wav` to Voicemeeter AUX; barge-in via `AI-clean/m8/voice_stop.txt` |
 | `AI-clean/m8/halo/build/windows/halo.exe` | — | OpenCE + `m8.patch` (the companion body) |
 
@@ -207,7 +208,9 @@ The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
 StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Gem**.
 The name is set in two places at once by the panel: the game's `config.toml`
-`[companion] name` and `m8.toml`'s `[mate] name`.
+`[companion] name` and `m8.toml`'s `[mate] name`. Memory is shared with the stream: m8 writes
+each session to Cognee (`:8011`, `[memory]` in `m8.toml`, `source = "halo"`) and recalls past
+sessions + the player at connect.
 
 **Legacy:** the chasm NPC path (`chasm/` + `xbox/OpenCE` on `chasm-bridge`, `:7341`) is
 kept on disk but no longer in the panel; it commands existing NPCs through the `opence`
