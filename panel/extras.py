@@ -34,6 +34,7 @@ EXTRAS = [
     {
         'id': 'now_playing',
         'title': 'Now Playing overlay',
+        'bat': 'start_scripts/start_now_playing.bat',
         'script': 'extras/now_playing.py',
         'kind': 'window',
         'desc': 'Always-on-top now-playing bar, for OBS window capture.',
