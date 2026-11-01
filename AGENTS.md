@@ -50,12 +50,12 @@ starts and monitors it.
   `[companion] name` (state/event/console text; env `HALO_COMPANION_NAME`) and `m8.toml`'s
   `[mate] name` (prompts, voice, feed). The m8 tab's **Companion → Name** box writes both;
   restart m8 and OpenCE to apply. Persona prompts use the `{name}` placeholder.
-- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`9955006`):
+- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`c3035a9`):
   mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag,
-  and the Gem rename (`[mate] name`, `examples/kevin` persona prompt). The companion's
-  in-game text lives in `OpenCE` branch **`m8-kevin`** (`41f734cf`,
-  `port/linux/game/companion.c`); the game's own `KEVIN MIC` key and `kevin` console
-  command keep their upstream names.
+  and the Gem rename (`[mate] name`, `{name}` in the persona prompt, `examples/kevin` kept
+  as the persona folder name). The companion's in-game text lives in `OpenCE` branch
+  **`m8-kevin`** (`ab991706`, `port/linux/game/companion.c` + `port/linux/src/port_config.c`);
+  the game's own `KEVIN MIC` key and `kevin` console command keep their upstream names.
 
 ### Legacy: the chasm NPC path
 
