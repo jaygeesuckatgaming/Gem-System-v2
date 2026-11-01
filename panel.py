@@ -14,9 +14,9 @@ Replaces the tkinter gui.py incrementally, tab by tab. Phase 1: Vision.
 from nicegui import ui
 
 from panel.service_manager import ServiceManager
-from panel.tabs import (audio_tab, browser_tab, games_tab, idle_tab, llm_tab,
-                        memory_tab, music_tab, neurosync_tab, osc_tab, ssn_tab,
-                        stt_tab, tts_tab, twitch_tab, vision_tab)
+from panel.tabs import (audio_tab, browser_tab, extras_tab, games_tab, idle_tab,
+                        llm_tab, memory_tab, music_tab, neurosync_tab, osc_tab,
+                        ssn_tab, stt_tab, tts_tab, twitch_tab, vision_tab)
 
 service_manager = ServiceManager()
 
@@ -35,6 +35,7 @@ def page_shell():
         ui.link('Vision', '/vision').classes('text-base text-slate-200 no-underline hover:text-white')
         ui.link('Audio', '/audio').classes('text-base text-slate-200 no-underline hover:text-white')
         ui.link('Games', '/games').classes('text-base text-slate-200 no-underline hover:text-white')
+        ui.link('Extras', '/extras').classes('text-base text-slate-200 no-underline hover:text-white')
         ui.link('Idle', '/idle').classes('text-base text-slate-200 no-underline hover:text-white')
         ui.link('Neurosync', '/neurosync').classes('text-base text-slate-200 no-underline hover:text-white')
         ui.link('Music', '/music').classes('text-base text-slate-200 no-underline hover:text-white')
@@ -81,6 +82,13 @@ def games_page():
     page_shell()
     with ui.column().classes('w-full max-w-[1200px] mx-auto p-4 gap-4'):
         games_tab.create(service_manager)
+
+
+@ui.page('/extras')
+def extras_page():
+    page_shell()
+    with ui.column().classes('w-full max-w-[1200px] mx-auto p-4 gap-4'):
+        extras_tab.create(service_manager)
 
 
 @ui.page('/audio')
