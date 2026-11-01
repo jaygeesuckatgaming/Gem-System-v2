@@ -16,24 +16,16 @@ from nicegui import ui
 
 from drive_game import assets
 from panel import m8_audio_sync, settings_store
-from panel.service_manager import CHASM_ROOT, M8_ROOT
+from panel.service_manager import M8_ROOT
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = PROJECT_ROOT / "models" / "cars"
 PLAYERS_DIR = MODELS_DIR / "players"
 
-# --- chasm / OpenCE -------------------------------------------------------
-OPEN_CE_DIR = Path(os.environ.get(
-    'OPENCE_DIR',
-    r'C:\Users\jayge\Documents\AI\xbox\OpenCE\build\windows',
-))
-OPEN_CE_EXE = OPEN_CE_DIR / 'halo.exe'
-CHASM_URL = os.environ.get('CHASM_URL', 'http://127.0.0.1:7341').rstrip('/')
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
-OPEN_CE_MODEL = 'gemma3:4b-it-qat'
 CREATE_NEW_CONSOLE = 0x00000010
 
-# m8's own OpenCE patch (the Kevin companion), separate from the chasm build.
+# m8's own OpenCE patch (the Kevin companion).
 M8_HALO_DIR = Path(M8_ROOT) / 'halo' / 'build' / 'windows'
 M8_HALO_EXE = M8_HALO_DIR / 'halo.exe'
 
@@ -52,18 +44,41 @@ async def save_uploaded_model(upload, target_dir: Path, project_root: Path = PRO
 
 def create(sm):
     ui.label('Games').classes('text-2xl font-bold')
+
+    # m8 TTS (the Breeze-API bridge to StyleTTS2) and the m8 brain, as buttons
+    # beside the game launch controls
+    with ui.row().classes('gap-2 items-center flex-wrap'):
+        ui.label('m8 companion:').classes('text-sm text-slate-400')
+        m8tts_btn = ui.button('Start m8 TTS adapter', icon='play_arrow',
+                              on_click=lambda: toggle_m8_service('m8_tts'))
+        m8_btn = ui.button('Start m8', icon='play_arrow',
+                           on_click=lambda: toggle_m8_service('m8'))
+
+    async def toggle_m8_service(name):
+        if await sm.is_running(name):
+            sm.stop(name)
+        else:
+            sm.start(name)
+        await asyncio.sleep(1.0)
+        await refresh_m8_services()
+
+    async def refresh_m8_services():
+        m8tts_running = await sm.is_running('m8_tts')
+        m8_running = await sm.is_running('m8')
+        m8tts_btn.text = 'Stop m8 TTS adapter' if m8tts_running else 'Start m8 TTS adapter'
+        m8_btn.text = 'Stop m8' if m8_running else 'Start m8'
+
+    ui.timer(3.0, refresh_m8_services, immediate=True)
+
     with ui.tabs().classes('w-full').props('mobile-arrows no-caps') as tabs:
         drive_tab = ui.tab('Gem Drive')
         iso_tab = ui.tab('Isometric Game')
-        opence_tab = ui.tab('Chasm - OpenCE')
         kevin_tab = ui.tab('m8 - Kevin')
-    with ui.tab_panels(tabs, value=drive_tab).classes('w-full'):
+    with ui.tab_panels(tabs, value=kevin_tab).classes('w-full'):
         with ui.tab_panel(drive_tab):
             _gem_drive_tab(sm)
         with ui.tab_panel(iso_tab):
             _iso_game_tab(sm, settings_store.load_config())
-        with ui.tab_panel(opence_tab):
-            _chasm_opence_tab(sm)
         with ui.tab_panel(kevin_tab):
             _m8_kevin_tab(sm)
 
@@ -693,208 +708,6 @@ def _open_folder(path: Path):
         ui.notify(f'Could not open folder: {exc}', type='negative')
 
 
-def _chasm_opence_tab(sm):
-    ui.label('Chasm - OpenCE').classes('text-2xl font-bold')
-    ui.label(
-        'Halo: Combat Evolved campaign NPCs driven by chasm. chasm runs the LLM, '
-        'profile and actions; StyleTTS2 voices the replies; the OpenCE native bridge '
-        'reads the NPC, plays the voice positionally and applies the actions.'
-    ).classes('text-sm text-slate-400 max-w-3xl')
-
-    tiles = {}
-
-    with ui.card().classes('w-full'):
-        with ui.row().classes('w-full items-center justify-between'):
-            ui.label('Stack').classes('text-lg font-bold')
-            overall = ui.badge('CHECKING').props('outline')
-        with ui.row().classes('gap-3 flex-wrap'):
-            for key, title in (
-                ('chasm', 'chasm backend'),
-                ('stt', 'Whisper STT'),
-                ('tts', 'StyleTTS2 voice'),
-                ('game', 'OpenCE game'),
-                ('link', 'Game <-> chasm'),
-            ):
-                with ui.card().classes('bg-slate-800 px-4 py-2 min-w-[180px]'):
-                    ui.label(title).classes('text-xs text-slate-400')
-                    tiles[key] = ui.label('-').classes('text-lg font-bold text-slate-500')
-        with ui.row().classes('gap-3 flex-wrap mt-2'):
-            for key, title in (
-                ('llm', 'Ollama model'),
-                ('profile', 'Profile'),
-                ('heartbeat', 'Heartbeat'),
-                ('ttsurl', 'TTS endpoint'),
-            ):
-                with ui.card().classes('bg-slate-800 px-4 py-2 min-w-[180px]'):
-                    ui.label(title).classes('text-xs text-slate-400')
-                    tiles[key] = ui.label('-').classes('text-sm text-slate-300')
-
-        def mark(key, running):
-            tiles[key].text = 'running' if running else 'stopped'
-            tiles[key].classes(replace='text-lg font-bold ' + (
-                'text-green-400' if running else 'text-slate-500'))
-
-        async def refresh():
-            chasm_running = await sm.is_running('chasm')
-            whisper_running = await sm.is_running('whisper')
-            tts_running = await sm.is_running('styletts2')
-            game_running = await asyncio.to_thread(_opence_running)
-
-            mark('chasm', chasm_running)
-            mark('stt', whisper_running)
-            mark('tts', tts_running)
-            mark('game', game_running)
-
-            connected = False
-            phase = 'disconnected'
-            last_seen = '-'
-            if chasm_running:
-                try:
-                    async with httpx.AsyncClient(timeout=2.0) as client:
-                        response = await client.get(f'{CHASM_URL}/connection/status')
-                    data = response.json()
-                    connected = bool(data.get('connected'))
-                    phase = data.get('phase') or phase
-                    seconds = data.get('last_seen_secs')
-                    if isinstance(seconds, (int, float)):
-                        last_seen = f'{seconds:.1f}s ago'
-                except Exception:
-                    phase = 'unreachable'
-
-            tiles['link'].text = f'{phase} - {last_seen}' if chasm_running else 'chasm off'
-            tiles['link'].classes(replace='text-lg font-bold ' + (
-                'text-green-400' if connected else 'text-slate-500'))
-            tiles['heartbeat'].text = last_seen if chasm_running else 'chasm off'
-
-            try:
-                async with httpx.AsyncClient(timeout=2.0) as client:
-                    response = await client.get(f'{OLLAMA_URL}/api/tags')
-                names = [model.get('name', '') for model in response.json().get('models', [])]
-                family = OPEN_CE_MODEL.split(':')[0]
-                if any(name.startswith(family) for name in names):
-                    tiles['llm'].text = OPEN_CE_MODEL
-                    tiles['llm'].classes(replace='text-sm text-green-400')
-                else:
-                    tiles['llm'].text = 'Ollama up - model missing' if names else 'Ollama up - no models'
-                    tiles['llm'].classes(replace='text-sm text-orange-300')
-            except Exception:
-                tiles['llm'].text = 'Ollama offline'
-                tiles['llm'].classes(replace='text-sm text-red-400')
-
-            tiles['profile'].text = 'opence'
-            tiles['ttsurl'].text = '127.0.0.1:13300/tts'
-
-            ready = chasm_running and whisper_running and tts_running and game_running and connected
-            overall.text = 'READY' if ready else 'ATTENTION'
-            overall.props['color'] = 'green' if ready else 'orange'
-
-            chasm_button.text = 'Stop chasm' if chasm_running else 'Start chasm'
-            stt_button.text = 'Stop Whisper' if whisper_running else 'Start Whisper'
-            tts_button.text = 'Stop StyleTTS2' if tts_running else 'Start StyleTTS2'
-            game_button.text = 'Stop OpenCE' if game_running else 'Launch OpenCE'
-
-        async def toggle_chasm():
-            if await sm.is_running('chasm'):
-                sm.stop('chasm')
-            else:
-                sm.start('chasm')
-            await asyncio.sleep(1.2)
-            await refresh()
-
-        async def toggle_stt():
-            if await sm.is_running('whisper'):
-                sm.stop('whisper')
-            else:
-                sm.start('whisper')
-            await asyncio.sleep(1.2)
-            await refresh()
-
-        async def toggle_tts():
-            if await sm.is_running('styletts2'):
-                sm.stop('styletts2')
-            else:
-                sm.start('styletts2')
-            await asyncio.sleep(1.2)
-            await refresh()
-
-        def start_game():
-            if not OPEN_CE_EXE.exists():
-                ui.notify(f'OpenCE not found: {OPEN_CE_EXE}', type='negative')
-                return
-            try:
-                subprocess.Popen(
-                    [str(OPEN_CE_EXE)],
-                    cwd=str(OPEN_CE_DIR),
-                    creationflags=CREATE_NEW_CONSOLE,
-                )
-                ui.notify('Starting OpenCE')
-            except Exception as exc:
-                ui.notify(f'Could not start OpenCE: {exc}', type='negative')
-
-        def stop_game():
-            subprocess.run(['taskkill', '/F', '/IM', 'halo.exe'], capture_output=True)
-            ui.notify('Stopped OpenCE')
-
-        async def toggle_game():
-            if await asyncio.to_thread(_opence_running):
-                await asyncio.to_thread(stop_game)
-            else:
-                start_game()
-            await asyncio.sleep(1.2)
-            await refresh()
-
-        with ui.row().classes('gap-2 items-center flex-wrap mt-3'):
-            chasm_button = ui.button('Start chasm', icon='play_arrow', on_click=toggle_chasm)
-            stt_button = ui.button('Start Whisper', icon='play_arrow', on_click=toggle_stt)
-            tts_button = ui.button('Start StyleTTS2', icon='play_arrow', on_click=toggle_tts)
-            game_button = ui.button('Launch OpenCE', icon='sports_esports', on_click=toggle_game)
-            ui.button('Refresh', icon='refresh', on_click=refresh).props('flat')
-
-        ui.timer(2.0, refresh, immediate=True)
-
-    with ui.card().classes('w-full'):
-        ui.label('Quick start').classes('text-lg font-bold')
-        ui.label(
-            '1. Start chasm backend.   2. Start Whisper STT.   3. Start StyleTTS2 voice.   '
-            '4. Launch OpenCE.   5. In a campaign mission, stand near an NPC and press T '
-            'to type, or hold V to speak.'
-        ).classes('text-sm text-slate-300')
-        ui.label(
-            'Push-to-talk is V (controls.push_to_talk): hold it, speak, release. The '
-            'transcript and reply appear on the HUD. The game shows Xbox glyphs: '
-            'A = Space, B = F (melee) or Escape in menus, X = E (use/pick up), Y = Q.'
-        ).classes('text-sm text-slate-400 mt-1')
-        ui.label(
-            'First run: put an Xbox Halo CE .iso/.xiso next to halo.exe; the game '
-            f'extracts maps/ (about 2 GB). chasm settings: '
-            f'{Path(CHASM_ROOT) / "chasm.settings.json"}; active profile: opence.'
-        ).classes('text-xs text-slate-500 mt-1')
-
-    with ui.card().classes('w-full'):
-        ui.label('Paths').classes('text-lg font-bold')
-        for title, path in (
-            ('OpenCE executable', OPEN_CE_EXE),
-            ('OpenCE config', OPEN_CE_DIR / 'config.toml'),
-            ('chasm backend', Path(CHASM_ROOT) / 'target' / 'release' / 'chasm.exe'),
-            ('chasm profile', Path(CHASM_ROOT) / 'profiles' / 'opence'),
-        ):
-            exists = path.exists()
-            with ui.row().classes('items-center gap-2'):
-                ui.icon('check_circle' if exists else 'cancel').classes(
-                    'text-green-400' if exists else 'text-red-400')
-                ui.label(title).classes('text-sm text-slate-300 w-40')
-                ui.label(str(path)).classes('text-xs text-slate-500 break-all')
-
-        with ui.row().classes('gap-2 items-center flex-wrap mt-2'):
-            ui.button('Open OpenCE folder', icon='folder_open',
-                      on_click=lambda: _open_folder(OPEN_CE_DIR)).props('flat')
-            ui.button('Open chasm folder', icon='folder_open',
-                      on_click=lambda: _open_folder(Path(CHASM_ROOT))).props('flat')
-            ui.link('Open chasm UI', f'{CHASM_URL}/app', new_tab=True)
-            ui.link('chasm health', f'{CHASM_URL}/health', new_tab=True)
-            ui.link('connection status', f'{CHASM_URL}/connection/status', new_tab=True)
-
-
 def _m8_kevin_tab(sm):
     ui.label('m8 - Kevin').classes('text-2xl font-bold')
     ui.label(
@@ -970,9 +783,6 @@ def _m8_kevin_tab(sm):
 
             laya_button.text = 'Stop Laya' if states['laya'] else 'Start Laya'
             tts_button.text = 'Stop StyleTTS2' if states['tts'] else 'Start StyleTTS2'
-            m8tts_button.text = 'Stop m8 TTS' if states['m8tts'] else 'Start m8 TTS'
-            whisper_button.text = 'Stop Whisper' if states['whisper'] else 'Start Whisper'
-            m8_button.text = 'Stop m8' if states['m8'] else 'Start m8'
             game_button.text = 'Stop OpenCE' if game_running else 'Launch OpenCE'
 
         async def toggle_service(name):
@@ -1014,12 +824,6 @@ def _m8_kevin_tab(sm):
                                     on_click=lambda: toggle_service('laya'))
             tts_button = ui.button('Start StyleTTS2', icon='play_arrow',
                                    on_click=lambda: toggle_service('styletts2'))
-            m8tts_button = ui.button('Start m8 TTS', icon='play_arrow',
-                                     on_click=lambda: toggle_service('m8_tts'))
-            whisper_button = ui.button('Start Whisper', icon='play_arrow',
-                                       on_click=lambda: toggle_service('whisper'))
-            m8_button = ui.button('Start m8', icon='play_arrow',
-                                  on_click=lambda: toggle_service('m8'))
             game_button = ui.button('Launch OpenCE', icon='sports_esports',
                                     on_click=toggle_game)
             ui.button('Refresh', icon='refresh', on_click=refresh).props('flat')

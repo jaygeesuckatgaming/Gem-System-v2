@@ -17,10 +17,8 @@ from nicegui import ui
 
 CREATE_NEW_CONSOLE = 0x00000010
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# The chasm checkout lives outside this project; override with CHASM_ROOT.
-CHASM_ROOT = os.environ.get('CHASM_ROOT', r'C:\Users\jayge\Documents\AI\chasm')
-# m8 (Kev/Laya companion) lives beside the project; override with M8_ROOT.
-M8_ROOT = os.environ.get('M8_ROOT', r'C:\Users\jayge\Documents\AI\m8')
+# m8 (Kev/Laya companion) lives in the clean tree; override with M8_ROOT.
+M8_ROOT = os.environ.get('M8_ROOT', r'C:\Users\jayge\Documents\AI\AI-clean\m8')
 
 # Registry — grows as tabs migrate to the new panel
 SERVICES = {
@@ -59,12 +57,7 @@ SERVICES = {
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_drive_game.bat'),
         'health': 'http://127.0.0.1:5010/health',
         'port': 5010,
-    },
-    'chasm': {
-        'title': 'chasm',
-        'bat': os.path.join(CHASM_ROOT, 'start-chasm.bat'),
-        'health': 'http://127.0.0.1:7341/health',
-        'port': 7341,
+        'header': False,
     },
     'styletts2': {
         'title': 'StyleTTS2',
@@ -77,24 +70,28 @@ SERVICES = {
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_whisper_server.bat'),
         'health': 'http://127.0.0.1:13310/health',
         'port': 13310,
+        'header': False,
     },
     'm8_tts': {
-        'title': 'm8 TTS',
+        'title': 'm8 TTS adapter',
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_m8_styletts2.bat'),
         'health': 'http://127.0.0.1:8091/health',
         'port': 8091,
+        'header': False,
     },
     'm8': {
         'title': 'm8',
         'bat': os.path.join(M8_ROOT, 'start-m8.bat'),
         'health': 'http://127.0.0.1:8090/',
         'port': 8090,
+        'header': False,
     },
     'stt': {
         'title': 'STT',
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_listen.bat'),
         'health': None,   # no HTTP server — tracked by PID liveness only
         'port': None,
+        'header': False,
     },
 }
 
@@ -244,19 +241,27 @@ class ServiceManager:
             self._refresh_chip(name)
 
     # --- UI --------------------------------------------------------------------
+    def render_service(self, name):
+        """One service chip: status dot + title + start/stop button."""
+        info = SERVICES[name]
+        with ui.row().classes('items-center gap-1 rounded-lg px-2 py-1 bg-slate-700'):
+            self._dots[name] = ui.icon('circle').classes('text-slate-400 text-xs')
+            self._status_labels[name] = ui.label(info['title']).classes('text-sm')
+            self._buttons[name] = (
+                ui.button('', icon='play_arrow',
+                          on_click=lambda n=name: self.toggle(n))
+                .props('flat dense size=sm color=green')
+                .tooltip('Start / stop')
+            )
+        self._refresh_chip(name)
+
     def render_header(self):
-        """Header chips: status dot + title + start/stop button per service."""
+        """Header chips: only the services that live on the main page. The
+        rest are rendered by their own tab (Audio, Games)."""
         with ui.row().classes('items-center gap-2'):
             for name, info in SERVICES.items():
-                with ui.row().classes('items-center gap-1 rounded-lg px-2 py-1 bg-slate-700'):
-                    self._dots[name] = ui.icon('circle').classes('text-slate-400 text-xs')
-                    self._status_labels[name] = ui.label(info['title']).classes('text-sm')
-                    self._buttons[name] = (
-                        ui.button('', icon='play_arrow',
-                                  on_click=lambda n=name: self.toggle(n))
-                        .props('flat dense size=sm color=green')
-                        .tooltip('Start / stop')
-                    )
+                if info.get('header', True):
+                    self.render_service(name)
         # Poll immediately and every 3 seconds
         ui.timer(3.0, self.poll_all, immediate=True)
 

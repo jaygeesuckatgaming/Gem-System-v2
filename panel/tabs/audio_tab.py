@@ -28,6 +28,10 @@ def create(sm):
     ui.label('Settings load from config.py directly; changes apply live to a running MCP server '
              'when you press Save.').classes('text-sm text-slate-400')
 
+    with ui.row().classes('items-center gap-2'):
+        ui.label('Services:').classes('text-sm text-slate-400')
+        sm.render_service('stt')
+
     runtime = {'out_stream': None, 'in_stream': None, 'testing_out': False,
                'monitoring_in': False, 'phase': 0.0, 'samplerate': 48000.0}
 
