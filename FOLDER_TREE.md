@@ -41,7 +41,7 @@ Gem-System-v2/
 │   │   └── karaoke/               # Karaoke dual-track songs (gitignored)
 │   └── background_songs/          # Background music (gitignored)
 │
-├── extras/                        # Extra tools (Extras tab: panel/tabs/extras_tab.py)
+├── extras/                        # Extra tools (Extras tab; some start via start_scripts/*.bat)
 │   ├── __init__.py
 │   ├── gpu_viz.py                 # Hardware monitor (GPU/CPU/RAM graphs)
 │   ├── now_playing.py             # Now-playing overlay (OBS capture)

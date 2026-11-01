@@ -26,9 +26,10 @@ EXTRAS = [
     {
         'id': 'gpu_viz',
         'title': 'GPU / CPU monitor',
+        'bat': 'start_scripts/start_GPU_Viz.bat',
         'script': 'extras/gpu_viz.py',
         'kind': 'window',
-        'desc': 'Live GPU load and VRAM plus CPU and RAM graphs (tkinter). Needs pynvml.',
+        'desc': 'Live GPU load and VRAM plus CPU and RAM graphs. Needs pynvml.',
     },
     {
         'id': 'now_playing',
@@ -40,6 +41,7 @@ EXTRAS = [
     {
         'id': 'token_usage',
         'title': 'Token usage overlay',
+        'bat': 'start_scripts/start_token_usage.bat',
         'script': 'extras/token_usage.py',
         'kind': 'window',
         'desc': 'Always-on-top LLM token counter. Reads token_usage_state.json.',
@@ -47,6 +49,7 @@ EXTRAS = [
     {
         'id': 'text_scroller',
         'title': 'Text scroller',
+        'bat': 'start_scripts/start_text_scroller.bat',
         'script': 'extras/text_scroller.py',
         'kind': 'window',
         'desc': 'Rolls a text file up the screen; it asks for the file when it starts.',
@@ -70,8 +73,15 @@ EXTRAS = [
 ]
 
 
+def _path(relative: str) -> str:
+    return os.path.join(PROJECT_ROOT, relative)
+
+
 def script_path(item: dict) -> str:
-    return os.path.join(PROJECT_ROOT, item['script'])
+    """The .bat that starts it (with its env and console title), else its script."""
+    if item.get('bat'):
+        return _path(item['bat'])
+    return _path(item['script'])
 
 
 def exists(item: dict) -> bool:
@@ -79,13 +89,20 @@ def exists(item: dict) -> bool:
 
 
 def launch(item: dict) -> int:
-    """Starts a window script in its own titled console; returns the cmd PID."""
+    """Starts a window entry in its own titled console; returns the cmd PID.
+
+    Entries with a `bat` go through it (it sets the title and the conda env);
+    the rest run under the panel's own Python with a title set here.
+    """
     path = script_path(item)
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    command = f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"'
+    if item.get('bat'):
+        args = ['cmd', '/c', path]
+    else:
+        args = ['cmd', '/c', f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"']
     proc = subprocess.Popen(
-        ['cmd', '/c', command],
+        args,
         creationflags=CREATE_NEW_CONSOLE,
         cwd=PROJECT_ROOT,
     )

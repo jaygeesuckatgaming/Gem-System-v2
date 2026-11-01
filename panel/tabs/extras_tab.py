@@ -26,9 +26,11 @@ def _card(item: dict, pids: dict, refreshers: list) -> None:
                 ui.label(item['title']).classes('text-lg font-bold')
                 ui.label(item['desc']).classes('text-xs text-slate-400 max-w-2xl')
                 if extras.exists(item):
-                    ui.label(item['script']).classes('text-xs text-slate-500 font-mono')
+                    ui.label(item.get('bat') or item['script']).classes(
+                        'text-xs text-slate-500 font-mono')
                 else:
-                    ui.label(f"missing: {item['script']}").classes('text-xs text-red-400 font-mono')
+                    ui.label(f"missing: {extras.script_path(item)}").classes(
+                        'text-xs text-red-400 font-mono')
             with ui.row().classes('gap-2 items-center'):
                 status = ui.label('stopped').classes('text-sm text-slate-500')
                 action = ui.button('Start', icon='play_arrow').props('flat dense')
