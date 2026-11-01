@@ -206,6 +206,8 @@ close browser. Everything else dies with its console window.
 The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
 StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Gem**.
+The name is set in two places at once by the panel: the game's `config.toml`
+`[companion] name` and `m8.toml`'s `[mate] name`.
 
 **Legacy:** the chasm NPC path (`chasm/` + `xbox/OpenCE` on `chasm-bridge`, `:7341`) is
 kept on disk but no longer in the panel; it commands existing NPCs through the `opence`

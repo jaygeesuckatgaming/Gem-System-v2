@@ -133,6 +133,22 @@ def read_section_value(path: Path, section: str, key: str) -> str:
     return ""
 
 
+DEFAULT_NAME = "Gem"
+
+
+def companion_name() -> str:
+    """The companion's name: m8.toml's [mate] name, "Gem" when unset."""
+    return read_section_value(M8_TOML, "mate", "name") or DEFAULT_NAME
+
+
+def set_companion_name(name: str) -> dict:
+    """Write one name to both m8 (persona, voice, prompts) and the game (its words)."""
+    name = (name or "").strip() or DEFAULT_NAME
+    set_section_value(M8_TOML, "mate", "name", name)
+    set_section_value(HALO_CONFIG, "companion", "name", name)
+    return {"name": name, "m8": str(M8_TOML), "halo": str(HALO_CONFIG)}
+
+
 def apply(stored_input: str, stored_output: str) -> dict:
     input_name, output_name = resolve_audio(stored_input, stored_output)
 
@@ -158,4 +174,5 @@ def current() -> dict:
         "model": read_section_value(M8_TOML, "llm", "model"),
         "vision": read_section_value(M8_TOML, "llm", "vision_model"),
         "url": read_section_value(M8_TOML, "llm", "url"),
+        "name": companion_name(),
     }

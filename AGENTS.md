@@ -46,6 +46,10 @@ starts and monitors it.
   `AI-clean/m8/voice_stop.txt` on barge-in so playback stops when the player talks.
 - **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
+- **Name**: the companion's name is one setting in two files — the game's `config.toml`
+  `[companion] name` (state/event/console text; env `HALO_COMPANION_NAME`) and `m8.toml`'s
+  `[mate] name` (prompts, voice, feed). The m8 tab's **Companion → Name** box writes both;
+  restart m8 and OpenCE to apply. Persona prompts use the `{name}` placeholder.
 - **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`9955006`):
   mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag,
   and the Gem rename (`[mate] name`, `examples/kevin` persona prompt). The companion's

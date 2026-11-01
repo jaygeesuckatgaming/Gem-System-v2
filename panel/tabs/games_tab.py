@@ -74,7 +74,7 @@ def create(sm):
     with ui.tabs().classes('w-full').props('mobile-arrows no-caps') as tabs:
         drive_tab = ui.tab('Gem Drive')
         iso_tab = ui.tab('Isometric Game')
-        gem_tab = ui.tab('m8 - Gem')
+        gem_tab = ui.tab(f'm8 - {m8_audio_sync.companion_name()}')
     with ui.tab_panels(tabs, value=gem_tab).classes('w-full'):
         with ui.tab_panel(drive_tab):
             _gem_drive_tab(sm)
@@ -734,10 +734,11 @@ def _open_folder(path: Path):
 
 
 def _m8_gem_tab(sm):
-    ui.label('m8 - Gem').classes('text-2xl font-bold')
+    companion = m8_audio_sync.companion_name()
+    ui.label(f'm8 - {companion}').classes('text-2xl font-bold')
     ui.label(
         'The demo companion: Laya decides the action, Ollama writes the line, StyleTTS2 voices '
-        'it, Whisper hears you, and the m8-patched OpenCE gives Gem his body.'
+        f'it, Whisper hears you, and the m8-patched OpenCE gives {companion} their body.'
     ).classes('text-sm text-slate-400 max-w-3xl')
 
     tiles = {}
@@ -845,6 +846,22 @@ def _m8_gem_tab(sm):
             ui.button('Refresh', icon='refresh', on_click=refresh).props('flat')
 
         ui.timer(2.0, refresh, immediate=True)
+
+    with ui.card().classes('w-full'):
+        ui.label('Companion').classes('text-lg font-bold')
+        name_input = ui.input('Name', value=companion).classes('w-full max-w-md')
+        ui.label(
+            'Written to m8.toml [mate] name (the prompts and the voice) and the game\'s '
+            'config.toml [companion] name (the words in its state and events). '
+            'Restart m8 and OpenCE to apply.'
+        ).classes('text-xs text-slate-500')
+
+        def save_name():
+            result = m8_audio_sync.set_companion_name(name_input.value)
+            name_input.value = result['name']
+            ui.notify(f'Saved {result["name"]}; restart m8 and OpenCE to apply')
+
+        ui.button('Save name', icon='save', on_click=save_name).props('flat')
 
     with ui.card().classes('w-full'):
         ui.label('Models').classes('text-lg font-bold')
@@ -966,7 +983,8 @@ def _m8_gem_tab(sm):
         ui.label('Quick start').classes('text-lg font-bold')
         ui.label(
             '1. Laya.   2. StyleTTS2.   3. m8 TTS.   4. Whisper.   5. m8.   '
-            '6. Launch OpenCE (m8).   Talk to Gem with the mic.'
+            '6. Launch OpenCE (m8).   '
+            f'Talk to {companion} with the mic.'
         ).classes('text-sm text-slate-300')
         ui.label(
             'Kev is replaced by Laya: Laya picks do/which/speak, Ollama writes the words, '

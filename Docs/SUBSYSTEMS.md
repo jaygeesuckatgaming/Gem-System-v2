@@ -318,7 +318,9 @@ Voice is played by `AI-clean/voice_player.py` (Gem's `AudioPlayer`) from
 when the player talks over Gem, and the player stops the file. Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
 `m8.toml` (`[mate]`, `[mic]`, `[stt]`, `[kev]`, `[llm]`, `[game]`) and the game's
-`[companion]` block (voice/radio volume, speech cooldown; KEVIN SETUP on the profile menu).
+`[companion]` block (name, voice/radio volume, speech cooldown; KEVIN SETUP on the profile
+menu). **Name**: `companion.name` (game text) and `[mate] name` (persona/voice) are written
+together by the panel's **Companion → Name** box; the prompts read it as `{name}`.
 
 **Legacy:** chasm (`chasm/` + `xbox/OpenCE` `chasm-bridge`, `:7341`) commands existing
 NPCs through a profile/action book; it is kept on disk but no longer in the panel.
