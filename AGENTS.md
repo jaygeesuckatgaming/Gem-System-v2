@@ -55,7 +55,7 @@ starts and monitors it.
   every `flush_seconds` (30), the levels reached, and a closing summary — and on game connect
   recalls past sessions and what it knows about the player. `get_memory_context` also asks for
   Halo sessions, so chat-Gem remembers them.
-- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`9b46369`):
+- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`0c3c60c`):
   mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag,
   the Gem rename (`[mate] name`, `{name}` in the persona prompt, `examples/kevin` kept
   as the persona folder name), and the shared Cognee memory (`src/memory.rs`, `[memory]`). The companion's in-game text lives in `OpenCE` branch
