@@ -298,3 +298,27 @@ Runtime control endpoints the GUI calls: pause/resume MCP, music download/queue/
 background/volume/duck, OSC emote/animation tests, camera scan, monitors, audio devices,
 face enrollment/list/delete (via `/api/vision/faces/*` proxies, main.py:2209-2250). Extras
 tab embeds gpu_viz / now_playing / token_usage / text scroller windows in-process.
+
+## Game companion — m8 - Kevin (canonical)
+
+The Halo: Combat Evolved campaign companion, and the only game path. Two processes:
+
+1. **The game** — `AI-clean/m8/halo/build/windows/halo.exe` (OpenCE + `m8.patch`). Its
+   `companion.c` spawns Kevin beside the player, drives his body through `unit_control`
+   (move, aim, fire, reload, cover, grenades, melee, vehicles, jump/crouch), and its
+   `mate_link.c` exchanges framed JSON + PCM with m8 on **47800**.
+2. **`AI-Clean/m8/m8/target/release/m8.exe m8.toml`** — the brain. It keeps the feed,
+   asks **Laya** (`[kev]`, `:5002`) for the quick decision, **Ollama** (`[llm]`,
+   `gemma3-4b-ctx`) for the line/vision, and sends speech to the **m8 TTS adapter**
+   (`:8091`, Breeze API → StyleTTS2 `:13300`). Mic: `Voicemeeter Out B1` → Silero VAD →
+   **Whisper** (`[stt]`, `:13310`).
+
+Voice is played by `AI-clean/voice_player.py` (Gem's `AudioPlayer`) from
+`tts_output/server_output.wav` to Voicemeeter AUX; m8 writes `AI-clean/m8/voice_stop.txt`
+when the player talks over Kevin, and the player stops the file. Persona: `examples/kevin`
+(`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
+`m8.toml` (`[mate]`, `[mic]`, `[stt]`, `[kev]`, `[llm]`, `[game]`) and the game's
+`[companion]` block (voice/radio volume, speech cooldown; KEVIN SETUP on the profile menu).
+
+**Legacy:** chasm (`chasm/` + `xbox/OpenCE` `chasm-bridge`, `:7341`) commands existing
+NPCs through a profile/action book; it is kept on disk but no longer in the panel.

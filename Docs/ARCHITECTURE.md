@@ -189,3 +189,24 @@ close browser. Everything else dies with its console window.
 - **Face recognition runs in vision.py, not main.py**, because it needs the raw frames at a
   fixed cadence; main.py only reacts to pushed appearance events and pulls `/faces/current`
   (5s cache) when it needs on-screen context.
+
+## 6. Game companion — m8 - Kevin (canonical)
+
+| Process | Port | Role |
+|---|---|---|
+| `AI-clean/m8/m8/target/release/m8.exe m8.toml` | **47800** | brain/link: game state in, actions + speech out |
+| `clients/m8_styletts2_adapter.py` | **8091** | Breeze TTS 2 API → StyleTTS2 (raw PCM) |
+| `tts/StyleTTS2/watcher.py` | **13300** | actual voice engine |
+| `clients/whisper_server.py` | **13310** | STT for the mic |
+| `clients/laya_server.py` | **5002** | `[kev]` decision model (`/v1/systemone`) |
+| Ollama | **11434** | `[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat` |
+| `AI-clean/voice_player.py` | — | plays `tts_output/server_output.wav` to Voicemeeter AUX; barge-in via `AI-clean/m8/voice_stop.txt` |
+| `AI-clean/m8/halo/build/windows/halo.exe` | — | OpenCE + `m8.patch` (the companion body) |
+
+The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
+with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
+StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Kevin**.
+
+**Legacy:** the chasm NPC path (`chasm/` + `xbox/OpenCE` on `chasm-bridge`, `:7341`) is
+kept on disk but no longer in the panel; it commands existing NPCs through the `opence`
+profile/action book and calls StyleTTS2/Whisper directly.

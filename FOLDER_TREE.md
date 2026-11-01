@@ -95,6 +95,18 @@ Gem-System-v2/
     └── start_GPU_Viz.bat
 ```
 
+## Sibling folders (outside this repo)
+
+```
+C:\Users\jayge\Documents\AI\
+├── AI-clean\m8\           # canonical game companion: m8 + halo/ (OpenCE m8-kevin)
+├── AI-clean\voice_player.py  # plays server_output.wav for m8 (Gem AudioPlayer + barge-in)
+├── chasm\                 # legacy NPC backend (:7341), kept on disk
+├── xbox\OpenCE\           # chasm-bridge build + shared maps/data root
+├── _archive\              # old m8 fork, chasm-bridge-fnv, old Gem-System, opence copies
+└── Gem-System-v2\         # this repo
+```
+
 ## Notes
 
 - **`config.py`** is the single source of truth for settings (gitignored — copy from `config_example.py`).

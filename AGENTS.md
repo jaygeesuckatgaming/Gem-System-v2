@@ -28,6 +28,34 @@ drive_game/ (:5010, Ursina window) ← !commands forwarded by main.py
     → crash/leader events POST /api/game/event → Gem commentary (throttled TTS + chat)
 ```
 
+## Game companion — m8 - Kevin (canonical, and the only game path)
+
+Halo: Combat Evolved campaign companion. The Gem panel's **Games → m8 - Kevin** tab
+starts and monitors it.
+
+- **Game**: `C:\Users\jayge\Documents\AI\AI-clean\m8\halo\build\windows\halo.exe`
+  (OpenCE + `m8.patch`, branch `m8-kevin`). Data root: `xbox/OpenCE/build/windows`.
+- **Brain/link**: `AI-clean/m8/m8/target/release/m8.exe m8.toml` (`:47800`), launched by
+  `AI-clean/m8/start-m8.bat`.
+- **Services it calls** (all Gem-System-v2): Laya `:5002` (`[kev]` decisions), Ollama
+  `:11434` (`[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat`), m8 TTS adapter `:8091`
+  → StyleTTS2 `:13300` (`[mate] voice_server`), Whisper `:13310` (`[stt]`), Silero VAD
+  inside m8, mic `Voicemeeter Out B1`.
+- **Voice playback**: `AI-clean/voice_player.py` (Gem's `AudioPlayer`) watches
+  `tts_output/server_output.wav` and plays it to Voicemeeter AUX; m8 writes
+  `AI-clean/m8/voice_stop.txt` on barge-in so playback stops when the player talks.
+- **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Kevin**; the Games
+  page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
+- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`f06103d`):
+  mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag.
+
+### Legacy: the chasm NPC path
+
+`C:\Users\jayge\Documents\AI\chasm` + `xbox/OpenCE` (branch `chasm-bridge`, `:7341`) is
+the older "command an existing NPC" engine (profile + 6-verb action book, StyleTTS2/Whisper
+called by the bridge directly). It is **kept on disk but no longer in the panel** and is not
+the current path. The `ai-player` network-co-op experiment and `halo_brain.py` are removed.
+
 ## Documentation index (read the one matching your task)
 
 | Doc | Answers |
