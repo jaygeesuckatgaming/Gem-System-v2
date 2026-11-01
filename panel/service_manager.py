@@ -17,7 +17,7 @@ from nicegui import ui
 
 CREATE_NEW_CONSOLE = 0x00000010
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# m8 (Kev/Laya companion) lives in the clean tree; override with M8_ROOT.
+# m8 (Gem/Laya companion) lives in the clean tree; override with M8_ROOT.
 M8_ROOT = os.environ.get('M8_ROOT', r'C:\Users\jayge\Documents\AI\AI-clean\m8')
 
 # Registry — grows as tabs migrate to the new panel

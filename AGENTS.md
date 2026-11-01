@@ -28,9 +28,9 @@ drive_game/ (:5010, Ursina window) ← !commands forwarded by main.py
     → crash/leader events POST /api/game/event → Gem commentary (throttled TTS + chat)
 ```
 
-## Game companion — m8 - Kevin (canonical, and the only game path)
+## Game companion — m8 - Gem (canonical, and the only game path)
 
-Halo: Combat Evolved campaign companion. The Gem panel's **Games → m8 - Kevin** tab
+Halo: Combat Evolved campaign companion. The Gem panel's **Games → m8 - Gem** tab
 starts and monitors it.
 
 - **Game**: `C:\Users\jayge\Documents\AI\AI-clean\m8\halo\build\windows\halo.exe`
@@ -44,10 +44,14 @@ starts and monitors it.
 - **Voice playback**: `AI-clean/voice_player.py` (Gem's `AudioPlayer`) watches
   `tts_output/server_output.wav` and plays it to Voicemeeter AUX; m8 writes
   `AI-clean/m8/voice_stop.txt` on barge-in so playback stops when the player talks.
-- **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Kevin**; the Games
+- **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
-- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`f06103d`):
-  mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag.
+- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`9955006`):
+  mic device by name, Ollama `model`/`vision_model`, whole-line TTS batching, barge-in flag,
+  and the Gem rename (`[mate] name`, `examples/kevin` persona prompt). The companion's
+  in-game text lives in `OpenCE` branch **`m8-kevin`** (`41f734cf`,
+  `port/linux/game/companion.c`); the game's own `KEVIN MIC` key and `kevin` console
+  command keep their upstream names.
 
 ### Legacy: the chasm NPC path
 

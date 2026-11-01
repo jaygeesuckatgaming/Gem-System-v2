@@ -190,7 +190,7 @@ close browser. Everything else dies with its console window.
   fixed cadence; main.py only reacts to pushed appearance events and pulls `/faces/current`
   (5s cache) when it needs on-screen context.
 
-## 6. Game companion — m8 - Kevin (canonical)
+## 6. Game companion — m8 - Gem (canonical)
 
 | Process | Port | Role |
 |---|---|---|
@@ -205,7 +205,7 @@ close browser. Everything else dies with its console window.
 
 The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
-StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Kevin**.
+StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Gem**.
 
 **Legacy:** the chasm NPC path (`chasm/` + `xbox/OpenCE` on `chasm-bridge`, `:7341`) is
 kept on disk but no longer in the panel; it commands existing NPCs through the `opence`

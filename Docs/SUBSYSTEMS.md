@@ -299,12 +299,12 @@ background/volume/duck, OSC emote/animation tests, camera scan, monitors, audio 
 face enrollment/list/delete (via `/api/vision/faces/*` proxies, main.py:2209-2250). Extras
 tab embeds gpu_viz / now_playing / token_usage / text scroller windows in-process.
 
-## Game companion — m8 - Kevin (canonical)
+## Game companion — m8 - Gem (canonical)
 
 The Halo: Combat Evolved campaign companion, and the only game path. Two processes:
 
 1. **The game** — `AI-clean/m8/halo/build/windows/halo.exe` (OpenCE + `m8.patch`). Its
-   `companion.c` spawns Kevin beside the player, drives his body through `unit_control`
+   `companion.c` spawns Gem beside the player, drives her body through `unit_control`
    (move, aim, fire, reload, cover, grenades, melee, vehicles, jump/crouch), and its
    `mate_link.c` exchanges framed JSON + PCM with m8 on **47800**.
 2. **`AI-Clean/m8/m8/target/release/m8.exe m8.toml`** — the brain. It keeps the feed,
@@ -315,7 +315,7 @@ The Halo: Combat Evolved campaign companion, and the only game path. Two process
 
 Voice is played by `AI-clean/voice_player.py` (Gem's `AudioPlayer`) from
 `tts_output/server_output.wav` to Voicemeeter AUX; m8 writes `AI-clean/m8/voice_stop.txt`
-when the player talks over Kevin, and the player stops the file. Persona: `examples/kevin`
+when the player talks over Gem, and the player stops the file. Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
 `m8.toml` (`[mate]`, `[mic]`, `[stt]`, `[kev]`, `[llm]`, `[game]`) and the game's
 `[companion]` block (voice/radio volume, speech cooldown; KEVIN SETUP on the profile menu).

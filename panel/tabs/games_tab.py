@@ -26,7 +26,7 @@ PLAYERS_DIR = MODELS_DIR / "players"
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
 CREATE_NEW_CONSOLE = 0x00000010
 
-# m8's own OpenCE patch (the Kevin companion).
+# m8's own OpenCE patch (the Gem companion).
 M8_HALO_DIR = Path(M8_ROOT) / 'halo' / 'build' / 'windows'
 M8_HALO_EXE = M8_HALO_DIR / 'halo.exe'
 
@@ -74,14 +74,14 @@ def create(sm):
     with ui.tabs().classes('w-full').props('mobile-arrows no-caps') as tabs:
         drive_tab = ui.tab('Gem Drive')
         iso_tab = ui.tab('Isometric Game')
-        kevin_tab = ui.tab('m8 - Kevin')
-    with ui.tab_panels(tabs, value=kevin_tab).classes('w-full'):
+        gem_tab = ui.tab('m8 - Gem')
+    with ui.tab_panels(tabs, value=gem_tab).classes('w-full'):
         with ui.tab_panel(drive_tab):
             _gem_drive_tab(sm)
         with ui.tab_panel(iso_tab):
             _iso_game_tab(sm, settings_store.load_config())
-        with ui.tab_panel(kevin_tab):
-            _m8_kevin_tab(sm)
+        with ui.tab_panel(gem_tab):
+            _m8_gem_tab(sm)
 
 
 def _gem_drive_tab(sm):
@@ -733,8 +733,8 @@ def _open_folder(path: Path):
         ui.notify(f'Could not open folder: {exc}', type='negative')
 
 
-def _m8_kevin_tab(sm):
-    ui.label('m8 - Kevin').classes('text-2xl font-bold')
+def _m8_gem_tab(sm):
+    ui.label('m8 - Gem').classes('text-2xl font-bold')
     ui.label(
         'The demo companion: Laya decides the action, Ollama writes the line, StyleTTS2 voices '
         'it, Whisper hears you, and the m8-patched OpenCE gives Gem his body.'
@@ -871,7 +871,7 @@ def _m8_kevin_tab(sm):
             with_input=True,
         ).classes('w-full max-w-md')
         ui.label(
-            'The vision model is used only for Kevin’s look; blank falls back to the dialogue model.'
+            'The vision model is used only for Gem’s look; blank falls back to the dialogue model.'
         ).classes('text-xs text-slate-500')
 
         async def load_models():
@@ -955,7 +955,7 @@ def _m8_kevin_tab(sm):
 
     with ui.card().classes('w-full'):
         with ui.row().classes('w-full items-center justify-between'):
-            ui.label('Kev / Kevin control panel').classes('text-lg font-bold')
+            ui.label('m8 control panel').classes('text-lg font-bold')
             ui.link('open in a new tab', 'http://127.0.0.1:8090', new_tab=True)
         ui.element('iframe').props(
             'src="http://127.0.0.1:8090/" '
