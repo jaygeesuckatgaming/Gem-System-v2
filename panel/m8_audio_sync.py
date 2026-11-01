@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-M8_ROOT = Path(os.environ.get("M8_ROOT", r"C:\Users\jayge\Documents\AI\m8"))
+M8_ROOT = Path(os.environ.get("M8_ROOT", r"C:\Users\jayge\Documents\AI\AI-clean\m8"))
 M8_TOML = M8_ROOT / "m8.toml"
 HALO_CONFIG = M8_ROOT / "halo" / "build" / "windows" / "config.toml"
 SDL_TOOL = PROJECT_ROOT / "tools" / "sdl_devices.exe"
@@ -157,4 +157,5 @@ def current() -> dict:
         "output": read_section_value(HALO_CONFIG, "audio", "output_device"),
         "model": read_section_value(M8_TOML, "llm", "model"),
         "vision": read_section_value(M8_TOML, "llm", "vision_model"),
+        "url": read_section_value(M8_TOML, "llm", "url"),
     }

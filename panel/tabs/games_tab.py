@@ -10,6 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from nicegui import ui
@@ -174,7 +175,40 @@ def _gem_drive_tab(sm):
             row_key='user',
         ).classes('w-full').props('flat dense dark')
 
+    def mark_offline():
+        state['data'] = None
+        state_badge.text = 'offline'
+        state_badge.props['color'] = 'grey'
+        demo_status.text = '● Demo off'
+        demo_status.classes(replace='text-sm text-slate-400')
+        for label in stat_labels.values():
+            label.text = '—'
+        if table.rows:
+            table.rows = []
+            table.update()
+
+    async def drive_up() -> bool:
+        parsed = urlparse(game_url)
+        host = parsed.hostname or '127.0.0.1'
+        port = parsed.port or 80
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=0.3)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
     async def refresh_state():
+        # Gem Drive is optional: don't poll (or log) while it is stopped
+        if not await drive_up():
+            mark_offline()
+            return
+
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 response = await client.get(f'{game_url}/api/state')
@@ -213,16 +247,7 @@ def _gem_drive_tab(sm):
                 f"{type(exc).__name__}: {exc}",
                 flush=True,
             )
-            state['data'] = None
-            state_badge.text = 'offline'
-            state_badge.props['color'] = 'grey'
-            demo_status.text = '● Demo off'
-            demo_status.classes(replace='text-sm text-slate-400')
-            for label in stat_labels.values():
-                label.text = '—'
-            if table.rows:
-                table.rows = []
-                table.update()
+            mark_offline()
 
     ui.timer(2.0, refresh_state, immediate=True)
 
@@ -712,17 +737,8 @@ def _m8_kevin_tab(sm):
     ui.label('m8 - Kevin').classes('text-2xl font-bold')
     ui.label(
         'The demo companion: Laya decides the action, Ollama writes the line, StyleTTS2 voices '
-        'it, Whisper hears you, and the m8-patched OpenCE gives Kevin his body.'
+        'it, Whisper hears you, and the m8-patched OpenCE gives Gem his body.'
     ).classes('text-sm text-slate-400 max-w-3xl')
-
-    with ui.card().classes('w-full'):
-        with ui.row().classes('w-full items-center justify-between'):
-            ui.label('Kev / Kevin control panel').classes('text-lg font-bold')
-            ui.link('open in a new tab', 'http://127.0.0.1:8090', new_tab=True)
-        ui.element('iframe').props(
-            'src="http://127.0.0.1:8090/" '
-            'sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation"'
-        ).classes('w-full h-[70vh] rounded-lg border-0 bg-slate-950')
 
     tiles = {}
     with ui.card().classes('w-full'):
@@ -832,6 +848,22 @@ def _m8_kevin_tab(sm):
 
     with ui.card().classes('w-full'):
         ui.label('Models').classes('text-lg font-bold')
+
+        def base_from_url(url: str) -> str:
+            url = (url or '').strip().rstrip('/')
+            for suffix in ('/v1/chat/completions', '/chat/completions', '/v1'):
+                if url.endswith(suffix):
+                    return url[: -len(suffix)]
+            return url or OLLAMA_URL
+
+        base_input = ui.input(
+            'Ollama base URL',
+            value=base_from_url(m8_audio_sync.current().get('url', '')),
+        ).classes('w-full max-w-md')
+        ui.label(
+            'm8 calls <base>/v1/chat/completions; the model list uses <base>/api/tags.'
+        ).classes('text-xs text-slate-500')
+
         model_select = ui.select({}, label='Dialogue model', with_input=True).classes('w-full max-w-md')
         vision_select = ui.select(
             {'': '(same as dialogue)'},
@@ -843,9 +875,10 @@ def _m8_kevin_tab(sm):
         ).classes('text-xs text-slate-500')
 
         async def load_models():
+            base = base_from_url(base_input.value)
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f'{OLLAMA_URL}/api/tags')
+                    response = await client.get(f'{base}/api/tags')
                 names = sorted({model['name'] for model in response.json().get('models', [])})
                 model_select.options = {name: name for name in names}
                 vision_select.options = {'': '(same as dialogue)', **{name: name for name in names}}
@@ -867,12 +900,15 @@ def _m8_kevin_tab(sm):
         async def save_model(restart: bool):
             dialogue = model_select.value
             vision = vision_select.value or ''
+            base = base_from_url(base_input.value)
             if not dialogue:
                 return
+            m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'url',
+                                            f'{base}/v1/chat/completions')
             m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'model', dialogue)
             m8_audio_sync.set_section_value(m8_audio_sync.M8_TOML, 'llm', 'vision_model', vision)
             detail = f'vision {vision}' if vision else 'vision uses the dialogue model'
-            ui.notify(f'Saved dialogue {dialogue}; {detail}' + (
+            ui.notify(f'Saved {base} · dialogue {dialogue}; {detail}' + (
                 '; restarting m8' if restart else '; restart m8 to apply'))
             if restart:
                 await restart_m8()
@@ -913,15 +949,24 @@ def _m8_kevin_tab(sm):
             ui.button('Refresh', icon='refresh', on_click=refresh_audio).props('flat')
         refresh_audio()
         ui.label(
-            'The mic goes to m8; the game plays Kevin through the output device. '
+            'The mic goes to m8; the game plays Gem through the output device. '
             'Restart m8 and OpenCE after changing the Audio tab.'
         ).classes('text-xs text-slate-500')
+
+    with ui.card().classes('w-full'):
+        with ui.row().classes('w-full items-center justify-between'):
+            ui.label('Kev / Kevin control panel').classes('text-lg font-bold')
+            ui.link('open in a new tab', 'http://127.0.0.1:8090', new_tab=True)
+        ui.element('iframe').props(
+            'src="http://127.0.0.1:8090/" '
+            'sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation"'
+        ).classes('w-full h-[70vh] rounded-lg border-0 bg-slate-950')
 
     with ui.card().classes('w-full'):
         ui.label('Quick start').classes('text-lg font-bold')
         ui.label(
             '1. Laya.   2. StyleTTS2.   3. m8 TTS.   4. Whisper.   5. m8.   '
-            '6. Launch OpenCE (m8).   Talk to Kevin with the mic.'
+            '6. Launch OpenCE (m8).   Talk to Gem with the mic.'
         ).classes('text-sm text-slate-300')
         ui.label(
             'Kev is replaced by Laya: Laya picks do/which/speak, Ollama writes the words, '
