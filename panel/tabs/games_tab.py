@@ -1008,6 +1008,18 @@ def _m8_gem_tab(sm):
         ui.timer(8.0, check_memory, immediate=True)
 
     with ui.card().classes('w-full'):
+        with ui.row().classes('w-full items-center justify-between'):
+            ui.label("Gem's eyes").classes('text-lg font-bold')
+            ui.link('open in a new tab', 'http://127.0.0.1:8090/eyes', new_tab=True)
+        ui.element('iframe').props(
+            'src="http://127.0.0.1:8090/eyes" sandbox="allow-same-origin allow-scripts"'
+        ).classes('w-full h-[260px] rounded-lg border-0 bg-slate-950')
+        ui.label(
+            "Live: the player's view as the vision model gets it, about once a second "
+            '(m8 page :8090). Add http://127.0.0.1:8090/eyes to OBS as a Browser Source.'
+        ).classes('text-xs text-slate-500')
+
+    with ui.card().classes('w-full'):
         ui.label('Audio devices').classes('text-lg font-bold')
         audio_label = ui.label().classes('text-sm text-slate-300')
 

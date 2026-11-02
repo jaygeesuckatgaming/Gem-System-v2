@@ -207,6 +207,9 @@ close browser. Everything else dies with its console window.
 The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
 StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Gem**.
+The same process serves its page on **8090**: `/history` (every model call, with the pictures
+Gem looked at) and `/eyes` — the player's view grabbed about once a second for the panel and an
+OBS Browser Source (`/eyes.png` is the latest frame).
 The name is set in two places at once by the panel: the game's `config.toml`
 `[companion] name` and `m8.toml`'s `[mate] name`. Memory is shared with the stream: m8 writes
 each session to Cognee (`:8011`, `[memory]` in `m8.toml`, `source = "halo"`) and recalls past

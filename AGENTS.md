@@ -50,12 +50,16 @@ starts and monitors it.
   `[companion] name` (state/event/console text; env `HALO_COMPANION_NAME`) and `m8.toml`'s
   `[mate] name` (prompts, voice, feed). The m8 tab's **Companion → Name** box writes both;
   restart m8 and OpenCE to apply. Persona prompts use the `{name}` placeholder.
+- **Eyes**: m8 serves `/eyes` (`:8090`) — the player's view at ~1 fps, transparent, for an OBS
+  Browser Source — and `/eyes.png` (latest frame; with no game, the newest saved view). The
+  frames the brain itself looks at are saved in `logs/views/` and shown in `/history`; the feed
+  and a Laya "look" serialise on one view request at a time.
 - **Memory**: m8 shares the stream's Cognee memory (`[memory]` in `m8.toml`, server
   `:8011`). It writes under `source = "halo"` — a session-start line, notable events batched
   every `flush_seconds` (30), the levels reached, and a closing summary — and on game connect
   recalls past sessions and what it knows about the player. `get_memory_context` also asks for
   Halo sessions, so chat-Gem remembers them.
-- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`41120ee`):
+- **m8 patches** live on branch **`gem-m8`** of `jaygeesuckatgaming/m8` (`7344d8a`):
   mic device by name, Ollama `model`/`vision_model`, `max_tokens` reply ceiling (50 cut lines
   mid-word; default 200), whole-line TTS batching, barge-in flag,
   the Gem rename (`[mate] name`, `{name}` in the persona prompt, `examples/kevin` kept

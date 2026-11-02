@@ -306,7 +306,7 @@ Laya/STT/Game Agent). Two jobs:
 Runtime control endpoints the GUI calls: pause/resume MCP, music download/queue/play/
 background/volume/duck, OSC emote/animation tests, camera scan, monitors, audio devices,
 face enrollment/list/delete (via `/api/vision/faces/*` proxies, main.py:2209-2250). Extras
-tab embeds gpu_viz / now_playing / token_usage / text scroller windows in-process.
+tab launches gpu_viz / now_playing / token_usage / text scroller in their own consoles.
 
 ## Game companion — m8 - Gem (canonical)
 
@@ -330,6 +330,10 @@ when the player talks over Gem, and the player stops the file. Persona: `example
 `[companion]` block (name, voice/radio volume, speech cooldown; KEVIN SETUP on the profile
 menu). **Name**: `companion.name` (game text) and `[mate] name` (persona/voice) are written
 together by the panel's **Companion → Name** box; the prompts read it as `{name}`.
+**Eyes**: m8's page on `:8090` serves `/eyes` — the player's view grabbed about once a second,
+transparent, for the panel card and an OBS Browser Source — and `/eyes.png`, the latest frame.
+The frames the brain itself looks at are saved in `logs/views/` and shown in `/history`; the
+feed and a Laya "look" take turns on one view request.
 
 **Legacy:** chasm (`chasm/` + `xbox/OpenCE` `chasm-bridge`, `:7341`) commands existing
 NPCs through a profile/action book; it is kept on disk but no longer in the panel.
