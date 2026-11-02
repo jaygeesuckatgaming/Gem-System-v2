@@ -49,12 +49,12 @@ EXTRAS = [
     },
     {
         'id': 'gpu_viz_remote',
-        'title': 'GPU / CPU monitor (server)',
+        'title': 'GPU / CPU monitor (this PC + server)',
         'script': 'extras/gpu_viz.py',
         'kind': 'window',
         'args': ['--server', _default_gpu_stats_url()],
-        'desc': 'The same overlay, drawing a server\'s stats. Run gpu_viz_server.py on that '
-                'machine; the URL is $GPU_STATS_URL (default: the LLM host, port 8092).',
+        'desc': 'This PC and the server side by side. Run gpu_viz_server.py on that machine; '
+                'the URL is $GPU_STATS_URL (default: the LLM host, port 8092).',
     },
     {
         'id': 'now_playing',

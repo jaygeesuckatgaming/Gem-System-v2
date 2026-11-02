@@ -1,6 +1,20 @@
+"""Hardware monitor overlay: this machine's GPU/CPU, and optionally a server's.
+
+    python gpu_viz.py
+        this PC only
+    python gpu_viz.py --server http://192.168.137.129:8092
+        this PC and that server side by side
+    GPU_STATS_URL=http://host:8092 python gpu_viz.py
+        the same, without the argument
+
+The server side comes from `gpu_viz_server.py`, which runs on the other
+machine and serves the same numbers at `/stats`.
+"""
+
 import argparse
 import json
 import os
+import socket
 import threading
 import tkinter as tk
 import urllib.request
@@ -66,123 +80,100 @@ class LiveGraph(tk.Canvas):
         self.create_text(self.w - 10, 15, text=f"{current_val:.1f}%", fill=self.line_color, anchor="e", font=("Segoe UI", 10, "bold"))
 
 
-class HardwareMonitorApp:
-    def __init__(self, root, server=""):
-        self.root = root
-        self.server = (server or "").rstrip("/")
-        self.remote_label = urlparse(self.server).netloc or self.server
-        self.interval_ms = 500
-        self.failures = 0
-        self.fetching = False
+class Collector:
+    """This machine's numbers, in the same shape gpu_viz_server.py serves."""
 
-        self.root.title("Real-Time Hardware Monitor")
-        self.root.geometry("500x420")
-        self.root.resizable(False, False)
-        self.root.configure(bg="#111111")
-
-        self.init_gpu()
-
-        # Title Label
-        tk.Label(
-            root,
-            text=(f"Remote: {self.remote_label}" if self.server
-                  else "System Performance History (Last 30s)"),
-            fg="#888888", bg="#111111", font=("Segoe UI", 10)
-        ).pack(pady=(12, 5))
-
-        # --- GPU Graph ---
-        self.gpu_graph = LiveGraph(
-            root, title=f"GPU VRAM ({self.remote_label or self.gpu_name})",
-            line_color="#76b900", fill_color="#182d00"  # NVIDIA Green
-        )
-        self.gpu_graph.pack(pady=6)
-
-        # --- CPU Graph ---
-        self.cpu_graph = LiveGraph(
-            root, title=f"CPU Utilization ({psutil.cpu_count(logical=True)} Threads)",
-            line_color="#00aaff", fill_color="#002b40"  # Intel/Tech Blue
-        )
-        self.cpu_graph.pack(pady=6)
-
-        # Numeric Summary Bar at Bottom
-        self.label_info = tk.Label(
-            root, text="Initializing...", fg="#bbbbbb", bg="#111111", font=("Segoe UI", 9)
-        )
-        self.label_info.pack(pady=5)
-
-        # Start monitoring loop
-        self.update_stats()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
-
-    def init_gpu(self):
-        self.gpu_available = False
-        self.gpu_name = "N/A"
-        # (a remote overlay draws the server's GPU; this machine's isn't queried)
-        if self.server or not HAS_NVML:
-            return
-        try:
-            pynvml.nvmlInit()
-            self.gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
-            self.gpu_name = pynvml.nvmlDeviceGetName(self.gpu_handle)
-            self.gpu_available = True
-        except Exception:
-            pass
-
-    def update_stats(self):
-        if self.server:
-            self.update_remote()
-        else:
-            self.update_local()
-        # Update every 500 ms (2 times per second -> 60 points = 30 seconds window)
-        self.root.after(self.interval_ms, self.update_stats)
-
-    def update_local(self):
-        # 1. Fetch GPU Info
-        vram_pct = 0.0
-        vram_str = "GPU: N/A"
-        if self.gpu_available:
+    def __init__(self):
+        self.available = False
+        self.name = "N/A"
+        self.handle = None
+        if HAS_NVML:
             try:
-                mem = pynvml.nvmlDeviceGetMemoryInfo(self.gpu_handle)
+                pynvml.nvmlInit()
+                self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                self.name = pynvml.nvmlDeviceGetName(self.handle)
+                self.available = True
+            except Exception:
+                self.handle = None
+        psutil.cpu_percent(interval=None)  # the first call is always 0
+
+    def read(self):
+        gpu = {"available": self.available, "name": self.name}
+        if self.handle is not None:
+            try:
+                mem = pynvml.nvmlDeviceGetMemoryInfo(self.handle)
                 used_mb = mem.used / (1024 ** 2)
                 total_mb = mem.total / (1024 ** 2)
-                vram_pct = (used_mb / total_mb) * 100
-                vram_str = f"VRAM: {used_mb:.0f}/{total_mb:.0f} MB"
+                gpu.update(
+                    vram_used_mb=round(used_mb),
+                    vram_total_mb=round(total_mb),
+                    vram_percent=round(used_mb / total_mb * 100, 1) if total_mb else 0.0,
+                )
+                try:
+                    gpu["util_percent"] = pynvml.nvmlDeviceGetUtilizationRates(self.handle).gpu
+                except Exception:
+                    pass
+                try:
+                    gpu["temp_c"] = pynvml.nvmlDeviceGetTemperature(
+                        self.handle, pynvml.NVML_TEMPERATURE_GPU)
+                except Exception:
+                    pass
             except Exception:
                 pass
-        self.gpu_graph.add_point(vram_pct)
-
-        # 2. Fetch CPU Info
-        cpu_pct = psutil.cpu_percent(interval=None)
-        self.cpu_graph.add_point(cpu_pct)
-
-        # 3. Update bottom info label
         ram = psutil.virtual_memory()
-        self.label_info.config(
-            text=f"{vram_str}  |  CPU: {cpu_pct:.1f}%  |  Sys RAM: {ram.percent:.1f}%"
-        )
+        return {
+            "host": socket.gethostname(),
+            "gpu": gpu,
+            "cpu": {
+                "percent": round(psutil.cpu_percent(interval=None), 1),
+                "threads": psutil.cpu_count(logical=True) or 0,
+            },
+            "ram": {"percent": round(ram.percent, 1)},
+        }
 
-    def update_remote(self):
-        if self.fetching:
-            return
-        self.fetching = True
-
-        def work():
+    def close(self):
+        if self.handle is not None:
             try:
-                with urllib.request.urlopen(f"{self.server}/stats", timeout=2.0) as response:
-                    data = json.load(response)
-                self.root.after(0, lambda: self.apply_remote(data, None))
-            except Exception as exc:
-                self.root.after(0, lambda: self.apply_remote(None, exc))
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
 
-        threading.Thread(target=work, daemon=True).start()
 
-    def apply_remote(self, data, error):
+class Column:
+    """One machine's two graphs and its summary line."""
+
+    def __init__(self, parent, title, server=""):
+        self.server = server.rstrip("/")
+        self.failures = 0
         self.fetching = False
+        self.host = ""
+        self.label_text = title
+
+        self.frame = tk.Frame(parent, bg="#111111")
+        self.title = tk.Label(
+            self.frame, text=title, fg="#888888", bg="#111111", font=("Segoe UI", 10, "bold"))
+        self.title.pack(pady=(6, 4))
+
+        self.gpu_graph = LiveGraph(
+            self.frame, title="GPU VRAM (starting…)",
+            line_color="#76b900", fill_color="#182d00")  # NVIDIA Green
+        self.gpu_graph.pack(pady=4)
+
+        self.cpu_graph = LiveGraph(
+            self.frame, title=f"CPU Utilization ({psutil.cpu_count(logical=True)} Threads)",
+            line_color="#00aaff", fill_color="#002b40")  # Intel/Tech Blue
+        self.cpu_graph.pack(pady=4)
+
+        self.info = tk.Label(
+            self.frame, text="Initializing...", fg="#bbbbbb", bg="#111111",
+            font=("Segoe UI", 9))
+        self.info.pack(pady=4)
+
+    def apply(self, data, error=None):
         if error is not None or not data:
             self.failures += 1
             if self.failures == 1 or self.failures % 20 == 0:
-                self.label_info.config(
-                    text=f"{self.remote_label}: offline ({self.failures} missed)")
+                self.info.config(text=f"offline ({self.failures} missed)")
             return
 
         self.failures = 0
@@ -190,7 +181,12 @@ class HardwareMonitorApp:
         cpu = data.get("cpu") or {}
         ram = data.get("ram") or {}
 
-        name = gpu.get("name") or self.remote_label
+        host = data.get("host")
+        if host and host != self.host:
+            self.host = host
+            self.title.config(text=f"{self.label_text} ({host})")
+
+        name = gpu.get("name") or "N/A"
         gpu_title = f"GPU VRAM ({name})"
         if self.gpu_graph.title != gpu_title:
             self.gpu_graph.title = gpu_title
@@ -212,29 +208,98 @@ class HardwareMonitorApp:
             bits.append(f"GPU: {float(gpu['util_percent']):.0f}%")
         if gpu.get("temp_c") is not None:
             bits.append(f"{float(gpu['temp_c']):.0f}°C")
-        gpu_extra = ("  " + " ".join(bits)) if bits else ""
-        self.label_info.config(
-            text=(f"{vram}{gpu_extra}  |  CPU: {float(cpu.get('percent') or 0):.1f}%  |  "
+        extra = ("  " + " ".join(bits)) if bits else ""
+        self.info.config(
+            text=(f"{vram}{extra}  |  CPU: {float(cpu.get('percent') or 0):.1f}%  |  "
                   f"RAM: {float(ram.get('percent') or 0):.1f}%")
         )
 
-    def on_close(self):
-        if self.gpu_available:
+
+class HardwareMonitorApp:
+    def __init__(self, root, server="", local=True):
+        self.root = root
+        root.title("Real-Time Hardware Monitor")
+        root.resizable(False, False)
+        root.configure(bg="#111111")
+        self.closed = False
+
+        self.collector = Collector() if local else None
+        self.server = (server or "").rstrip("/")
+
+        body = tk.Frame(root, bg="#111111")
+        body.pack(padx=8, pady=4)
+
+        self.local_column = None
+        self.remote_column = None
+        if local:
+            self.local_column = Column(body, "THIS PC")
+            self.local_column.frame.pack(side=tk.LEFT, padx=6)
+        if self.server:
+            self.remote_column = Column(body, "SERVER", server=self.server)
+            self.remote_column.frame.pack(side=tk.LEFT, padx=6)
+
+        if local and self.server:
+            root.geometry("1010x440")
+        else:
+            root.geometry("500x440")
+
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.tick()
+
+    def tick(self):
+        if self.closed:
+            return
+        if self.local_column is not None:
+            self.local_column.apply(self.collector.read())
+        if self.remote_column is not None:
+            self.fetch_remote(self.remote_column)
+        self.root.after(500, self.tick)
+
+    def fetch_remote(self, column):
+        if column.fetching:
+            return
+        column.fetching = True
+
+        def work():
             try:
-                pynvml.nvmlShutdown()
+                with urllib.request.urlopen(f"{column.server}/stats", timeout=2.0) as response:
+                    data = json.load(response)
+                error = None
+            except Exception as exc:
+                data, error = None, exc
+            try:
+                self.root.after(0, lambda: self.finish_remote(column, data, error))
             except Exception:
                 pass
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def finish_remote(self, column, data, error):
+        column.fetching = False
+        if self.closed:
+            return
+        column.apply(data, error)
+
+    def on_close(self):
+        self.closed = True
+        if self.collector is not None:
+            self.collector.close()
         self.root.destroy()
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Draw this machine's hardware, or a server's.")
+    parser = argparse.ArgumentParser(description="Draw this machine's hardware, and a server's.")
     parser.add_argument(
         "--server", default=os.environ.get("GPU_STATS_URL", ""),
         help="stats server base URL, e.g. http://192.168.137.129:8092 "
-             "(default: $GPU_STATS_URL; empty draws this machine)",
+             "(default: $GPU_STATS_URL). Its graphs go beside this PC's.",
+    )
+    parser.add_argument(
+        "--no-local", action="store_true",
+        help="leave out this PC and show only the server",
     )
     args = parser.parse_args()
+
     root = tk.Tk()
-    app = HardwareMonitorApp(root, server=args.server)
+    app = HardwareMonitorApp(root, server=args.server, local=not args.no_local)
     root.mainloop()

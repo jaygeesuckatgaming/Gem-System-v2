@@ -43,7 +43,7 @@ Gem-System-v2/
 │
 ├── extras/                        # Extra tools (Extras tab; some start via start_scripts/*.bat)
 │   ├── __init__.py
-│   ├── gpu_viz.py                 # Hardware monitor (GPU/CPU/RAM graphs)
+│   ├── gpu_viz.py                 # Hardware monitor (this PC, or this PC + a server)
 │   ├── gpu_viz_server.py          # Serves a machine's stats to gpu_viz.py --server
 │   ├── now_playing.py             # Now-playing overlay (OBS capture)
 │   ├── token_usage.py             # LLM token counter overlay
