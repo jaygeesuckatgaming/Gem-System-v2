@@ -1170,10 +1170,26 @@ def _halflife_tab(sm):
             except Exception as exc:
                 ui.notify(f'Could not save: {exc}', type='negative')
 
-        model_options = dict(HL_MODEL_OPTIONS)
-        if (HL_MOD_ROOT / 'models' / 'barney.mdl').exists():
-            model_options['models/barney.mdl'] = 'Barney (mod replacement installed)'
+        def model_choices():
+            choices = dict(HL_MODEL_OPTIONS)
+            models = HL_MOD_ROOT / 'models'
+            try:
+                for path in sorted(models.glob('*.mdl')):
+                    stem = path.stem
+                    if stem.lower().endswith(('01', '02', '03', '04', 't')):
+                        continue
+                    choices[f'models/{path.name}'] = f'{stem} (mod)'
+            except Exception:
+                pass
+            if (models / 'Barniel.mdl').exists():
+                choices['models/Barniel.mdl'] = 'Barniel (female Barney)'
+            current = current_model()
+            if current not in choices:
+                choices[current] = f'{current} (custom)'
+            return choices
+
         model_input = ui.input('Model path', value=current_model()).classes('w-full max-w-md')
+        model_options = model_choices()
         with ui.row().classes('gap-2 items-center flex-wrap'):
             ui.select(model_options, label='Built-in',
                       on_change=lambda e: setattr(model_input, 'value', e.value) if e.value else None
