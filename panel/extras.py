@@ -18,9 +18,25 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from urllib.parse import urlparse
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CREATE_NEW_CONSOLE = 0x00000010
+
+
+def _default_gpu_stats_url() -> str:
+    """The server's stats: $GPU_STATS_URL, else the host m8's LLM runs on, :8092."""
+    url = os.environ.get('GPU_STATS_URL')
+    if url:
+        return url
+    try:
+        from panel import m8_audio_sync
+        host = urlparse(m8_audio_sync.read_section_value(m8_audio_sync.M8_TOML, 'llm', 'url')).hostname
+        if host:
+            return f'http://{host}:8092'
+    except Exception:
+        pass
+    return 'http://127.0.0.1:8092'
 
 EXTRAS = [
     {
@@ -30,6 +46,15 @@ EXTRAS = [
         'script': 'extras/gpu_viz.py',
         'kind': 'window',
         'desc': 'Live GPU load and VRAM plus CPU and RAM graphs. Needs pynvml.',
+    },
+    {
+        'id': 'gpu_viz_remote',
+        'title': 'GPU / CPU monitor (server)',
+        'script': 'extras/gpu_viz.py',
+        'kind': 'window',
+        'args': ['--server', _default_gpu_stats_url()],
+        'desc': 'The same overlay, drawing a server\'s stats. Run gpu_viz_server.py on that '
+                'machine; the URL is $GPU_STATS_URL (default: the LLM host, port 8092).',
     },
     {
         'id': 'now_playing',
@@ -101,7 +126,9 @@ def launch(item: dict) -> int:
     if item.get('bat'):
         args = ['cmd', '/c', path]
     else:
-        args = ['cmd', '/c', f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"']
+        extra = ''.join(f' "{arg}"' for arg in item.get('args', []))
+        args = ['cmd', '/c',
+                f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"{extra}']
     proc = subprocess.Popen(
         args,
         creationflags=CREATE_NEW_CONSOLE,
