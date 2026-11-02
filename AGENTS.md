@@ -28,7 +28,7 @@ drive_game/ (:5010, Ursina window) ← !commands forwarded by main.py
     → crash/leader events POST /api/game/event → Gem commentary (throttled TTS + chat)
 ```
 
-## Game companion — m8 - Gem (canonical, and the only game path)
+## Game companion — m8 - Gem (canonical, the Halo path)
 
 Halo: Combat Evolved campaign companion. The Gem panel's **Games → m8 - Gem** tab
 starts and monitors it.
@@ -68,6 +68,17 @@ starts and monitors it.
   the companion also has the ai-player cliff guard (edge probe, turn or stop, follows the
   Chief down a drop but never a void); the game's own `KEVIN MIC` key and `kevin` console
   command keep their upstream names.
+
+### Half-Life — the same mate in GoldSrc (`hlsdk-mate`)
+
+The m8 link is game-agnostic; `AI-clean/hlsdk-mate` is the GoldSrc adapter (branch `gem-hlm8`,
+kept local). It builds an HLSDK-portable mod whose server DLL connects to the same
+`127.0.0.1:47800` link: `dlls/mate.cpp` (socket, state/orders) and `dlls/mate_world.cpp` (a
+`monster_barney` follower, `gem_mate` targetname, follow/hold/attack, catch-up teleport); the
+client DLL plays m8's PCM (`cl_dll/mate_audio.cpp` + `mate_wave.cpp`, waveOut). Commands are
+spoken ("Gem, stay here" / "follow me" / "attack") and m8 acts on them directly, not via Laya.
+Build/install/launch: `build_hlm8.bat`, `install_hlm8.bat`, `start_hlm8.bat`; the panel's
+**Games → Half-Life** tab drives them and shows the companion state.
 
 ### Legacy: the chasm NPC path
 

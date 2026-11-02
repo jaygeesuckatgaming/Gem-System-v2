@@ -8,11 +8,13 @@ crash), and the GAME_DRIVE_* settings.
 import asyncio
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
+import psutil
 from nicegui import ui
 
 from drive_game import assets
@@ -25,6 +27,11 @@ PLAYERS_DIR = MODELS_DIR / "players"
 
 OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
 CREATE_NEW_CONSOLE = 0x00000010
+
+# The Half-Life m8 mod (hlsdk-mate) and the game it lives in.
+HLSDK_ROOT = Path("C:/Users/jayge/Documents/AI/AI-clean/hlsdk-mate")
+HALF_LIFE_ROOT = Path("C:/Program Files (x86)/Steam/steamapps/common/Half-Life")
+HL_MOD_ROOT = HALF_LIFE_ROOT / "hlm8"
 
 # m8's own OpenCE patch (the Gem companion).
 M8_HALO_DIR = Path(M8_ROOT) / 'halo' / 'build' / 'windows'
@@ -75,6 +82,7 @@ def create(sm):
         drive_tab = ui.tab('Gem Drive')
         iso_tab = ui.tab('Isometric Game')
         gem_tab = ui.tab(f'm8 - {m8_audio_sync.companion_name()}')
+        hl_tab = ui.tab('Half-Life')
     with ui.tab_panels(tabs, value=gem_tab).classes('w-full'):
         with ui.tab_panel(drive_tab):
             _gem_drive_tab(sm)
@@ -82,6 +90,8 @@ def create(sm):
             _iso_game_tab(sm, settings_store.load_config())
         with ui.tab_panel(gem_tab):
             _m8_gem_tab(sm)
+        with ui.tab_panel(hl_tab):
+            _halflife_tab(sm)
 
 
 def _gem_drive_tab(sm):
@@ -1082,3 +1092,99 @@ def _m8_gem_tab(sm):
                     new_tab=True)
             ui.button('Open m8 folder', icon='folder_open',
                       on_click=lambda: _open_folder(Path(M8_ROOT))).props('flat')
+
+
+def _run_hl_bat(name: str):
+    path = HLSDK_ROOT / name
+    if not path.exists():
+        ui.notify(f'Missing {path}', type='negative')
+        return
+    subprocess.Popen(['cmd', '/c', str(path)], cwd=str(HLSDK_ROOT),
+                     creationflags=CREATE_NEW_CONSOLE)
+
+
+def _stop_hl():
+    subprocess.run(['taskkill', '/IM', 'hl.exe', '/F'], capture_output=True)
+    ui.notify('Half-Life stopped')
+
+
+def _halflife_tab(sm):
+    ui.label('Half-Life').classes('text-2xl font-bold')
+    ui.label(
+        'The m8 companion in GoldSrc: the hlsdk-mate mod (a follower that talks, follows and '
+        'fights), beside the m8 brain.'
+    ).classes('text-sm text-slate-400 max-w-3xl')
+
+    with ui.card().classes('w-full'):
+        ui.label('Status').classes('text-lg font-bold')
+        with ui.row().classes('gap-6 items-center flex-wrap'):
+            hl_status = ui.label('Half-Life: …').classes('text-sm text-slate-300')
+            mod_status = ui.label('Mod: …').classes('text-sm text-slate-300')
+            link_status = ui.label('m8 link: …').classes('text-sm text-slate-300')
+        with ui.row().classes('gap-2 items-center flex-wrap mt-1'):
+            ui.button('Build', icon='build',
+                      on_click=lambda: _run_hl_bat('build_hlm8.bat')).props('flat')
+            ui.button('Install', icon='download',
+                      on_click=lambda: _run_hl_bat('install_hlm8.bat')).props('flat')
+            ui.button('Launch Half-Life', icon='play_arrow',
+                      on_click=lambda: _run_hl_bat('start_hlm8.bat'))
+            ui.button('Stop', icon='stop', on_click=_stop_hl).props('flat')
+            ui.button('Open mod folder', icon='folder_open',
+                      on_click=lambda: os.startfile(HL_MOD_ROOT)).props('flat')
+
+    with ui.card().classes('w-full'):
+        ui.label('Companion').classes('text-lg font-bold')
+        companion_state = ui.label('Not connected.').classes('text-sm text-slate-300 max-w-3xl')
+        companion_actions = ui.label('').classes('text-xs text-slate-500')
+        ui.label(
+            'Say "Gem, stay here", "Gem, follow me" or "Gem, attack" on the mic. '
+            'm8 needs to run, and the m8 TTS adapter before it.'
+        ).classes('text-xs text-slate-500 mt-1')
+        with ui.row().classes('gap-3 items-center flex-wrap mt-1'):
+            ui.link('m8 brain page', 'http://127.0.0.1:8090', new_tab=True)
+            ui.link("Gem's eyes", 'http://127.0.0.1:8090/eyes', new_tab=True)
+
+    async def refresh():
+        try:
+            running = any((process.info.get('name') or '').lower() == 'hl.exe'
+                          for process in psutil.process_iter(['name']))
+        except Exception:
+            running = False
+        hl_status.text = 'Half-Life: running' if running else 'Half-Life: stopped'
+        hl_status.classes(replace='text-sm ' +
+                          ('text-green-400' if running else 'text-slate-300'))
+
+        installed_dll = HL_MOD_ROOT / 'dlls' / 'hl.dll'
+        installed_client = HL_MOD_ROOT / 'cl_dlls' / 'client.dll'
+        built_dll = HLSDK_ROOT / 'build' / 'dlls' / 'Release' / 'hl.dll'
+        if installed_dll.exists() and installed_client.exists():
+            installed_at = min(installed_dll.stat().st_mtime, installed_client.stat().st_mtime)
+            when = time.strftime('%Y-%m-%d %H:%M', time.localtime(installed_at))
+            stale = built_dll.exists() and built_dll.stat().st_mtime > installed_at
+            mod_status.text = f'Mod: installed {when}' + (' · newer build, install it' if stale else '')
+            mod_status.classes(replace='text-sm ' +
+                               ('text-amber-300' if stale else 'text-green-400'))
+        else:
+            mod_status.text = 'Mod: not installed'
+            mod_status.classes(replace='text-sm text-red-400')
+
+        state = {}
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                trace = (await client.get('http://127.0.0.1:8090/trace?since=0')).json()
+            state = trace.get('state') or {}
+        except Exception:
+            state = {}
+        if state.get('game') == 'Half-Life':
+            link_status.text = f"m8 link: {state.get('level', '?')}"
+            link_status.classes(replace='text-sm text-green-400')
+            companion_state.text = state.get('state') or ''
+            names = [action.get('name', '') for action in state.get('actions', [])]
+            companion_actions.text = ('Actions offered: ' + ', '.join(names)) if names else ''
+        else:
+            link_status.text = 'm8 link: no Half-Life state'
+            link_status.classes(replace='text-sm text-slate-400')
+            companion_state.text = 'Launch Half-Life above, with m8 running.'
+            companion_actions.text = ''
+
+    ui.timer(3.0, refresh, immediate=True)
