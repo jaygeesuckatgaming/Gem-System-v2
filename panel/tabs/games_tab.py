@@ -1045,18 +1045,28 @@ def _m8_gem_tab(sm):
 
     with ui.card().classes('w-full'):
         ui.label('Quick start').classes('text-lg font-bold')
+        for number, step in enumerate((
+            'Ollama must be up at the base URL on the Models card — the panel does not start it.',
+            'Laya (decisions) — Start Laya above.',
+            'StyleTTS2 (voice engine) — Start StyleTTS2 above.',
+            'm8 TTS adapter (Games toolbar) — start it before m8: m8 reads its sample rate '
+            'when it starts.',
+            'Whisper STT (Audio tab).',
+            'm8 (Games toolbar).',
+            'Launch OpenCE above, then just talk: the mic is always listening and the game\'s '
+            'mic key mutes it.',
+        ), 1):
+            ui.label(f'{number}. {step}').classes('text-sm text-slate-300')
         ui.label(
-            '1. Laya.   2. StyleTTS2.   3. m8 TTS.   4. Whisper.   5. m8.   '
-            '6. Launch OpenCE (m8).   '
-            f'Talk to {companion} with the mic.'
-        ).classes('text-sm text-slate-300')
-        ui.label(
-            'Kev is replaced by Laya: Laya picks do/which/speak, Ollama writes the words, '
-            'StyleTTS2 speaks them.'
+            f'Laya picks do/which/speak, Ollama writes what {companion} says, StyleTTS2 voices it, '
+            'Whisper hears you, and OpenCE (with m8\'s patch) gives them a body. Cognee (Memory '
+            'tab) is optional: it stores each play session and what they remember.'
         ).classes('text-xs text-slate-500 mt-1')
         with ui.row().classes('gap-3 items-center flex-wrap mt-2'):
             ui.link('m8 brain page', 'http://127.0.0.1:8090', new_tab=True)
             ui.link('Laya health', 'http://127.0.0.1:5002/health', new_tab=True)
             ui.link('Whisper health', 'http://127.0.0.1:13310/health', new_tab=True)
+            ui.link('Cognee health', f"{m8_audio_sync.memory_settings()['url'].rstrip('/')}/health",
+                    new_tab=True)
             ui.button('Open m8 folder', icon='folder_open',
                       on_click=lambda: _open_folder(Path(M8_ROOT))).props('flat')
