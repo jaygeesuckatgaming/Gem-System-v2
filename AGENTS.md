@@ -82,7 +82,10 @@ Build/install/launch: `build_hlm8.bat`, `install_hlm8.bat`, `start_hlm8.bat`; th
 `hlm8/mate_model.txt` (the tab's Companion model card); Barney, scientist, grunt and G-Man
 are precached, so Apply respawns her with the new body; a custom model is precached at map
 load, so it needs the map reloaded. The body must be an NPC model: player models (Gina,
-Gordon) have no companion animations and the AI cannot walk them.
+Gordon) have no companion animations and the AI cannot walk them. The female Barney
+replacement (Barniel) lives in `hlm8/models/` as `barney.mdl` plus `Barniel.mdl` and
+`Barniel01..03.mdl` (its bodygroups reference those names) with its lines in
+`hlm8/sound/barney/`; the panel's Barney option then says "mod replacement installed".
 
 ### Legacy: the chasm NPC path
 

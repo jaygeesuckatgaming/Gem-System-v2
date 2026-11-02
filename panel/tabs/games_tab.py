@@ -1170,9 +1170,12 @@ def _halflife_tab(sm):
             except Exception as exc:
                 ui.notify(f'Could not save: {exc}', type='negative')
 
+        model_options = dict(HL_MODEL_OPTIONS)
+        if (HL_MOD_ROOT / 'models' / 'barney.mdl').exists():
+            model_options['models/barney.mdl'] = 'Barney (mod replacement installed)'
         model_input = ui.input('Model path', value=current_model()).classes('w-full max-w-md')
         with ui.row().classes('gap-2 items-center flex-wrap'):
-            ui.select(HL_MODEL_OPTIONS, label='Built-in',
+            ui.select(model_options, label='Built-in',
                       on_change=lambda e: setattr(model_input, 'value', e.value) if e.value else None
                       ).classes('w-64')
             ui.button('Apply model', icon='check', on_click=apply_model)
