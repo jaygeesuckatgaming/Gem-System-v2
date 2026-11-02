@@ -64,8 +64,10 @@ starts and monitors it.
   mid-word; default 200), whole-line TTS batching, barge-in flag,
   the Gem rename (`[mate] name`, `{name}` in the persona prompt, `examples/kevin` kept
   as the persona folder name), and the shared Cognee memory (`src/memory.rs`, `[memory]`). The companion's in-game text lives in `OpenCE` branch
-  **`m8-kevin`** (`ab991706`, `port/linux/game/companion.c` + `port/linux/src/port_config.c`);
-  the game's own `KEVIN MIC` key and `kevin` console command keep their upstream names.
+  **`m8-kevin`** (`450a8692`, `port/linux/game/companion.c` + `port/linux/src/port_config.c`);
+  the companion also has the ai-player cliff guard (edge probe, turn or stop, follows the
+  Chief down a drop but never a void); the game's own `KEVIN MIC` key and `kevin` console
+  command keep their upstream names.
 
 ### Legacy: the chasm NPC path
 
