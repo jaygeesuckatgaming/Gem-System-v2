@@ -124,13 +124,18 @@ def launch(item: dict) -> int:
     if not os.path.exists(path):
         raise FileNotFoundError(path)
     if item.get('bat'):
-        args = ['cmd', '/c', path]
+        # (cmd /c <bat> keeps the bat's own TITLE and conda env)
+        command = ['cmd', '/c', path]
+        shell = False
     else:
+        # (a raw string through the shell: Popen's list quoting escapes the inner
+        # quotes as \" which cmd then sees literally)
         extra = ''.join(f' "{arg}"' for arg in item.get('args', []))
-        args = ['cmd', '/c',
-                f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"{extra}']
+        command = f'title Gem Extras: {item["title"]} && "{sys.executable}" -u "{path}"{extra}'
+        shell = True
     proc = subprocess.Popen(
-        args,
+        command,
+        shell=shell,
         creationflags=CREATE_NEW_CONSOLE,
         cwd=PROJECT_ROOT,
     )
