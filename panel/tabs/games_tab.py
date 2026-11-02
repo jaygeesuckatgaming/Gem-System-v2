@@ -32,6 +32,14 @@ CREATE_NEW_CONSOLE = 0x00000010
 HLSDK_ROOT = Path("C:/Users/jayge/Documents/AI/AI-clean/hlsdk-mate")
 HALF_LIFE_ROOT = Path("C:/Program Files (x86)/Steam/steamapps/common/Half-Life")
 HL_MOD_ROOT = HALF_LIFE_ROOT / "hlm8"
+HL_MODEL_OPTIONS = {
+    "models/barney.mdl": "Barney (security guard)",
+    "models/scientist.mdl": "Scientist",
+    "models/hgrunt.mdl": "HECU grunt",
+    "models/gman.mdl": "G-Man",
+    "models/player/gina/gina.mdl": "Gina (female HEV suit)",
+    "models/player/gordon/gordon.mdl": "Gordon (HEV suit)",
+}
 
 # m8's own OpenCE patch (the Gem companion).
 M8_HALO_DIR = Path(M8_ROOT) / 'halo' / 'build' / 'windows'
@@ -1143,6 +1151,38 @@ def _halflife_tab(sm):
         with ui.row().classes('gap-3 items-center flex-wrap mt-1'):
             ui.link('m8 brain page', 'http://127.0.0.1:8090', new_tab=True)
             ui.link("Gem's eyes", 'http://127.0.0.1:8090/eyes', new_tab=True)
+
+    with ui.card().classes('w-full'):
+        ui.label('Companion model').classes('text-lg font-bold')
+
+        def current_model():
+            try:
+                text = (HL_MOD_ROOT / 'mate_model.txt').read_text(encoding='utf-8').strip()
+                return text or 'models/barney.mdl'
+            except Exception:
+                return 'models/barney.mdl'
+
+        def apply_model():
+            model = (model_input.value or 'models/barney.mdl').strip()
+            try:
+                HL_MOD_ROOT.mkdir(parents=True, exist_ok=True)
+                (HL_MOD_ROOT / 'mate_model.txt').write_text(model + '\n', encoding='utf-8')
+                (HL_MOD_ROOT / 'mate_respawn.txt').write_text(str(time.time()), encoding='utf-8')
+                ui.notify(f'Model set to {model}')
+            except Exception as exc:
+                ui.notify(f'Could not save: {exc}', type='negative')
+
+        model_input = ui.input('Model path', value=current_model()).classes('w-full max-w-md')
+        with ui.row().classes('gap-2 items-center flex-wrap'):
+            ui.select(HL_MODEL_OPTIONS, label='Built-in',
+                      on_change=lambda e: setattr(model_input, 'value', e.value) if e.value else None
+                      ).classes('w-64')
+            ui.button('Apply model', icon='check', on_click=apply_model)
+        ui.label(
+            'Barney, scientist, grunt, G-Man, Gina (female HEV) and Gordon are precached, so Apply '
+            'respawns her with the new body. Any other model needs the map reloaded, because '
+            'precaching happens at map load.'
+        ).classes('text-xs text-slate-500')
 
     async def refresh():
         try:
