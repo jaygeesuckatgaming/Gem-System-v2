@@ -79,9 +79,10 @@ client DLL plays m8's PCM (`cl_dll/mate_audio.cpp` + `mate_wave.cpp`, waveOut). 
 spoken ("Gem, stay here" / "follow me" / "attack") and m8 acts on them directly, not via Laya.
 Build/install/launch: `build_hlm8.bat`, `install_hlm8.bat`, `start_hlm8.bat`; the panel's
 **Games → Half-Life** tab drives them and shows the companion state. **Model**:
-`hlm8/mate_model.txt` (the tab's Companion model card); Barney, scientist, grunt, G-Man,
-Gina (female HEV) and Gordon are precached, so Apply respawns her with the new body; a
-custom model is precached at map load, so it needs the map reloaded.
+`hlm8/mate_model.txt` (the tab's Companion model card); Barney, scientist, grunt and G-Man
+are precached, so Apply respawns her with the new body; a custom model is precached at map
+load, so it needs the map reloaded. The body must be an NPC model: player models (Gina,
+Gordon) have no companion animations and the AI cannot walk them.
 
 ### Legacy: the chasm NPC path
 

@@ -37,8 +37,6 @@ HL_MODEL_OPTIONS = {
     "models/scientist.mdl": "Scientist",
     "models/hgrunt.mdl": "HECU grunt",
     "models/gman.mdl": "G-Man",
-    "models/player/gina/gina.mdl": "Gina (female HEV suit)",
-    "models/player/gordon/gordon.mdl": "Gordon (HEV suit)",
 }
 
 # m8's own OpenCE patch (the Gem companion).
