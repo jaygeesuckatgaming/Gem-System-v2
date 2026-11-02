@@ -41,9 +41,12 @@ starts and monitors it.
   `:11434` (`[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat`), m8 TTS adapter `:8091`
   → StyleTTS2 `:13300` (`[mate] voice_server`), Whisper `:13310` (`[stt]`), Silero VAD
   inside m8, mic `Voicemeeter Out B1`.
-- **Voice playback**: `AI-clean/voice_player.py` (Gem's `AudioPlayer`) watches
-  `tts_output/server_output.wav` and plays it to Voicemeeter AUX; m8 writes
-  `AI-clean/m8/voice_stop.txt` on barge-in so playback stops when the player talks.
+- **Voice playback**: the game plays m8's PCM (the GoldSrc client through waveOut, OpenCE
+  through its own audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 doesn't write
+  `tts_output/server_output.wav` for m8's lines — otherwise the Python `voice_player`
+  (which plays that file to Voicemeeter AUX) plays every line a second time. (The check is a
+  local patch in the gitignored `tts/StyleTTS2/watcher.py`.) m8 writes
+  `AI-clean/m8/voice_stop.txt` on barge-in.
 - **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
 - **Name**: the companion's name is one setting in two files — the game's `config.toml`

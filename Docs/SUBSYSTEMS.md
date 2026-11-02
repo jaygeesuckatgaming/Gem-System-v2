@@ -322,9 +322,13 @@ The Halo: Combat Evolved campaign companion, and the only game path. Two process
    (`:8091`, Breeze API → StyleTTS2 `:13300`). Mic: `Voicemeeter Out B1` → Silero VAD →
    **Whisper** (`[stt]`, `:13310`).
 
-Voice is played by `AI-clean/voice_player.py` (Gem's `AudioPlayer`) from
-`tts_output/server_output.wav` to Voicemeeter AUX; m8 writes `AI-clean/m8/voice_stop.txt`
-when the player talks over Gem, and the player stops the file. Persona: `examples/kevin`
+Voice: the **game** plays m8's PCM (the GoldSrc client through waveOut; OpenCE through its own
+audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 does **not** write
+`tts_output/server_output.wav` for m8's lines — if it did, the Python `voice_player` (which
+plays that file to Voicemeeter AUX) would play every line a second time. The `no_save` check
+is a local patch in the gitignored `tts/StyleTTS2/watcher.py`. That player stays for
+the stream's own TTS; m8 writes `AI-clean/m8/voice_stop.txt` when the player talks over Gem.
+Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
 `m8.toml` (`[mate]`, `[mic]`, `[stt]`, `[kev]`, `[llm]`, `[game]`) and the game's
 `[companion]` block (name, voice/radio volume, speech cooldown; KEVIN SETUP on the profile

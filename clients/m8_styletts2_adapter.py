@@ -83,7 +83,7 @@ def wav_pcm(wav: bytes) -> tuple[bytes, int]:
 def synth(text: str) -> tuple[bytes, int]:
     request = urllib.request.Request(
         STYLE_TTS_URL,
-        data=json.dumps({"chatmessage": text, "text": text}).encode("utf-8"),
+        data=json.dumps({"chatmessage": text, "text": text, "no_save": True}).encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=90) as response:
