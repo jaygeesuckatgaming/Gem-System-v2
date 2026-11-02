@@ -86,7 +86,9 @@ Gordon) have no companion animations and the AI cannot walk them. Barniel (the f
 bodygroups `Barniel01..03.mdl` and talking head `BarnielT.mdl` (the main model loads those
 files itself; do not precache the IDSQ ones), and `mate_model.txt` points at
 `models/Barniel.mdl`. Vanilla Barneys stay vanilla, and the female voice overrides are not
-installed.
+installed. **Eyes**: the server turns m8's view requests into a `MateView` message; the client
+grabs the rendered frame (`glReadPixels`, 960 wide, before the HUD) into `hlm8/mate_view.raw`;
+the server forwards it as a view frame, so `/eyes` and the vision model work in GoldSrc.
 
 ### Legacy: the chasm NPC path
 
