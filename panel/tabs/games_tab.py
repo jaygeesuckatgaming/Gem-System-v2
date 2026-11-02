@@ -1196,9 +1196,48 @@ def _halflife_tab(sm):
                       ).classes('w-64')
             ui.button('Apply model', icon='check', on_click=apply_model)
         ui.label(
-            'Barney, scientist, grunt, G-Man, Gina (female HEV) and Gordon are precached, so Apply '
-            'respawns her with the new body. Any other model needs the map reloaded, because '
-            'precaching happens at map load.'
+            'Pick an installed NPC body (Barniel is the female Barney) or type another NPC model '
+            'path. Apply respawns her with it; a newly added custom model needs the map reloaded '
+            'once, because precaching happens at map load.'
+        ).classes('text-xs text-slate-500')
+
+    with ui.card().classes('w-full'):
+        ui.label('Voice output (in-game)').classes('text-lg font-bold')
+
+        def output_names():
+            try:
+                import sounddevice as sd
+                return [d['name'] for d in sd.query_devices() if d['max_output_channels'] > 0]
+            except Exception:
+                return []
+
+        def current_device():
+            try:
+                return (HL_MOD_ROOT / 'mate_audio_device.txt').read_text(encoding='utf-8').strip()
+            except Exception:
+                return ''
+
+        def apply_device():
+            name = (device_input.value or '').strip()
+            try:
+                HL_MOD_ROOT.mkdir(parents=True, exist_ok=True)
+                (HL_MOD_ROOT / 'mate_audio_device.txt').write_text(name + '\n', encoding='utf-8')
+                ui.notify(f'In-game voice: {name or "system default"}')
+            except Exception as exc:
+                ui.notify(f'Could not save: {exc}', type='negative')
+
+        options = {'': 'System default'}
+        for name in output_names():
+            options[name] = name
+        device_input = ui.input('Device (or part of its name)', value=current_device()).classes('w-full max-w-md')
+        with ui.row().classes('gap-2 items-center flex-wrap'):
+            ui.select(options, label='Device',
+                      on_change=lambda e: setattr(device_input, 'value', e.value) if e.value is not None else None
+                      ).classes('w-72')
+            ui.button('Apply device', icon='check', on_click=apply_device)
+        ui.label(
+            'The game plays Gem through waveOut; it applies to the next line. Names match as a '
+            'substring, so "Voicemeeter AUX" is enough. Empty means the system default.'
         ).classes('text-xs text-slate-500')
 
     async def refresh():

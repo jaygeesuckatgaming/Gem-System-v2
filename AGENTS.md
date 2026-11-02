@@ -45,7 +45,9 @@ starts and monitors it.
   through its own audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 doesn't write
   `tts_output/server_output.wav` for m8's lines — otherwise the Python `voice_player`
   (which plays that file to Voicemeeter AUX) plays every line a second time. (The check is a
-  local patch in the gitignored `tts/StyleTTS2/watcher.py`.) m8 writes
+  local patch in the gitignored `tts/StyleTTS2/watcher.py`.) The game's waveOut device is
+  `hlm8/mate_audio_device.txt` (the Half-Life tab's Voice output card; a name substring, empty
+  = system default). m8 writes
   `AI-clean/m8/voice_stop.txt` on barge-in.
 - **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.

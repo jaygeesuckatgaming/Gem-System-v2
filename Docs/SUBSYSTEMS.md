@@ -326,7 +326,9 @@ Voice: the **game** plays m8's PCM (the GoldSrc client through waveOut; OpenCE t
 audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 does **not** write
 `tts_output/server_output.wav` for m8's lines — if it did, the Python `voice_player` (which
 plays that file to Voicemeeter AUX) would play every line a second time. The `no_save` check
-is a local patch in the gitignored `tts/StyleTTS2/watcher.py`. That player stays for
+is a local patch in the gitignored `tts/StyleTTS2/watcher.py`. The game's voice device is
+`hlm8/mate_audio_device.txt` (Half-Life tab → Voice output; a name substring, empty = default).
+That player stays for
 the stream's own TTS; m8 writes `AI-clean/m8/voice_stop.txt` when the player talks over Gem.
 Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
