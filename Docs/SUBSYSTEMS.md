@@ -328,7 +328,8 @@ audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 does **not** write
 plays that file to Voicemeeter AUX) would play every line a second time. The `no_save` check
 is a local patch in the gitignored `tts/StyleTTS2/watcher.py`. The game's voice device is
 `hlm8/mate_audio_device.txt` (Half-Life tab → Voice output; a name substring, empty = default).
-That player stays for
+The engine's own sound is `snd_device` in `hlm8/config.cfg` (the tab's Game audio output; exact
+name; restart). That player stays for
 the stream's own TTS; m8 writes `AI-clean/m8/voice_stop.txt` when the player talks over Gem.
 Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:

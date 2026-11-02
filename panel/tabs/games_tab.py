@@ -1240,6 +1240,58 @@ def _halflife_tab(sm):
             'substring, so "Voicemeeter AUX" is enough. Empty means the system default.'
         ).classes('text-xs text-slate-500')
 
+    with ui.card().classes('w-full'):
+        ui.label('Game audio output').classes('text-lg font-bold')
+
+        def game_device():
+            try:
+                text = (HL_MOD_ROOT / 'config.cfg').read_text(encoding='utf-8', errors='replace')
+            except Exception:
+                return ''
+            import re
+            found = re.search(r'^\s*snd_device\s+"([^"]*)"', text, re.M)
+            return found.group(1) if found else ''
+
+        def set_game_device(name):
+            path = HL_MOD_ROOT / 'config.cfg'
+            try:
+                lines = (path.read_text(encoding='utf-8', errors='replace').splitlines()
+                         if path.exists() else [])
+            except Exception:
+                lines = []
+            line = (f'snd_device "{name}"'
+                    if name and name.lower() != 'default' else 'snd_device "Default"')
+            for index, existing in enumerate(lines):
+                if existing.strip().startswith('snd_device'):
+                    lines[index] = line
+                    break
+            else:
+                lines.append(line)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+        def apply_game_device():
+            name = (game_input.value or '').strip()
+            try:
+                set_game_device(name)
+                ui.notify(f'Game audio: {name or "Default"}; restart Half-Life')
+            except Exception as exc:
+                ui.notify(f'Could not save: {exc}', type='negative')
+
+        game_options = {'': 'System default'}
+        for name in output_names():
+            game_options[name] = name
+        game_input = ui.input('Sound device (exact name)', value=game_device()).classes('w-full max-w-md')
+        with ui.row().classes('gap-2 items-center flex-wrap'):
+            ui.select(game_options, label='Device',
+                      on_change=lambda e: setattr(game_input, 'value', e.value) if e.value is not None else None
+                      ).classes('w-72')
+            ui.button('Apply game audio', icon='check', on_click=apply_game_device)
+        ui.label(
+            "This is the engine's own sound (gunfire, ambience), written to hlm8/config.cfg as "
+            'snd_device. It needs Half-Life restarted, and the exact device name.'
+        ).classes('text-xs text-slate-500')
+
     async def refresh():
         try:
             running = any((process.info.get('name') or '').lower() == 'hl.exe'

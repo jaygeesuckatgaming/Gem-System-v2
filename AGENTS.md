@@ -47,7 +47,8 @@ starts and monitors it.
   (which plays that file to Voicemeeter AUX) plays every line a second time. (The check is a
   local patch in the gitignored `tts/StyleTTS2/watcher.py`.) The game's waveOut device is
   `hlm8/mate_audio_device.txt` (the Half-Life tab's Voice output card; a name substring, empty
-  = system default). m8 writes
+  = system default). The engine's own sound (gunfire, ambience) is GoldSrc's `snd_device` in
+  `hlm8/config.cfg` (the tab's Game audio output card; exact name; restart the game). m8 writes
   `AI-clean/m8/voice_stop.txt` on barge-in.
 - **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
