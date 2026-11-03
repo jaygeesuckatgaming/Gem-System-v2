@@ -225,7 +225,7 @@ flowchart LR
     ADAPT -->|/tts| TTS
     TTS -->|WAV → PCM| ADAPT
     ADAPT -->|PCM| M8
-    GAME -->|engine audio (snd_device)<br/>+ waveOut voice| VM
+    GAME -->|engine audio + waveOut voice| VM
     MAIN -->|speak| TTS
     TTS -->|server_output.wav| VP
     VP -->|AUX| VM
