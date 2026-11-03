@@ -3,7 +3,7 @@
 **Audience:** AI coding assistants + maintainer. **Answers:** "what process is that, on what
 port, in which conda env, and how do the pieces connect?"
 
-Last verified: 2026-10-20. Ports/URLs are defaults from `config_example.py` — live values come
+Last verified: 2026-11-03. Ports/URLs are defaults from `config_example.py` — live values come
 from `config.py` (single source of truth, rewritten in place by `save_config()`, main.py:460).
 
 ## 1. System diagram
@@ -191,6 +191,57 @@ close browser. Everything else dies with its console window.
   (5s cache) when it needs on-screen context.
 
 ## 6. Game companion — m8 - Gem (canonical)
+
+```mermaid
+flowchart LR
+    subgraph GS["Gem-System-v2 (:8080 panel)"]
+        PANEL["Control panel :8080"]
+        LAYA["Laya :5002<br/>decisions"]
+        TTS["StyleTTS2 :13300<br/>the voice engine"]
+        STT["Whisper :13310<br/>STT"]
+        ADAPT["m8 TTS adapter :8091<br/>Breeze → StyleTTS2"]
+        MAIN["main.py (VTuber)"]
+        COG["Cognee :8011<br/>shared memory"]
+    end
+
+    M8["m8 brain :47800<br/>page :8090<br/>persona · memory · eyes"]
+    OLL["Ollama :11434<br/>LLM + vision"]
+    GAME["Game<br/>Half-Life (hlsdk-portable)<br/>OpenCE (Halo, m8-kevin)"]
+    VP["voice_player<br/>(m8_games/m8)"]
+    VM["Voicemeeter"]
+    UE["Unreal avatar (OSC)"]
+
+    PANEL -.->|start / monitor| LAYA
+    PANEL -.-> TTS
+    PANEL -.-> STT
+    PANEL -.-> ADAPT
+    MAIN -->|chat memory| COG
+    M8 <-->|sessions, player| COG
+    M8 -->|do / speak| LAYA
+    M8 -->|line + eyes| OLL
+    M8 -->|mic PCM| STT
+    M8 <-->|state/events/eyes ↔ actions/PCM| GAME
+    M8 -->|text| ADAPT
+    ADAPT -->|/tts| TTS
+    TTS -->|WAV → PCM| ADAPT
+    ADAPT -->|PCM| M8
+    GAME -->|engine audio (snd_device)<br/>+ waveOut voice| VM
+    MAIN -->|speak| TTS
+    TTS -->|server_output.wav| VP
+    VP -->|AUX| VM
+    VM -->|Out B1 mic| M8
+    MAIN -->|type_1 / poses| UE
+```
+
+**The two voice paths** — in-game, m8 sends text to the **m8 TTS adapter** (`:8091`), which
+calls **StyleTTS2** (`:13300`) and returns raw PCM; m8 forwards it to the game, which plays it
+through waveOut (device chosen in the panel). For the stream's own TTS, `main.py` asks
+StyleTTS2 directly; it writes `tts_output/server_output.wav`, which `voice_player` (now in
+`m8_games/m8`) plays to Voicemeeter AUX. The adapter sends `no_save`, so m8's lines never enter
+that file (no double playback).
+
+**Mic**: `Voicemeeter Out B1` → m8 (Silero VAD) → Whisper. **Memory**: Cognee is one graph,
+shared by `main.py` (chat) and m8 (play sessions, `source = "halo"`).
 
 | Process | Port | Role |
 |---|---|---|
