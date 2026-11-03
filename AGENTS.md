@@ -111,6 +111,7 @@ the current path. The `ai-player` network-co-op experiment and `halo_brain.py` a
 | [Docs/COMMANDS.md](Docs/COMMANDS.md) | "What does phrase X trigger?" — every trigger pattern → intent → handler → action |
 | [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md) | "What process is that, on what port?" — full process/service map, state files, startup/shutdown order |
 | [Docs/SUBSYSTEMS.md](Docs/SUBSYSTEMS.md) | "How does subsystem X work?" — per-subsystem reference (LLM, TTS, music, memory, vision+faces, Twitch, browser, idle, Laya, Neurosync, GUI) |
+| [Docs/REPOS.md](Docs/REPOS.md) | "Which repo is that?" — active/legacy/archive repos, branches, remotes, nested engines |
 | [FOLDER_TREE.md](FOLDER_TREE.md) | Directory layout |
 
 ## Critical facts
