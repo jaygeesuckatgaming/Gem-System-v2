@@ -194,15 +194,15 @@ close browser. Everything else dies with its console window.
 
 | Process | Port | Role |
 |---|---|---|
-| `AI-clean/m8/m8/target/release/m8.exe m8.toml` | **47800** | brain/link: game state in, actions + speech out |
+| `m8_games/m8/m8/target/release/m8.exe m8.toml` | **47800** | brain/link: game state in, actions + speech out |
 | `clients/m8_styletts2_adapter.py` | **8091** | Breeze TTS 2 API → StyleTTS2 (raw PCM) |
 | `tts/StyleTTS2/watcher.py` | **13300** | actual voice engine |
 | `clients/whisper_server.py` | **13310** | STT for the mic |
 | `clients/laya_server.py` | **5002** | `[kev]` decision model (`/v1/systemone`) |
 | Ollama | **11434** | `[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat` |
 | `cognee/cognee_server.py` | **8011** | `[memory]` shared Cognee memory (sessions, player) |
-| `AI-clean/voice_player.py` | — | plays `tts_output/server_output.wav` to Voicemeeter AUX; barge-in via `AI-clean/m8/voice_stop.txt` |
-| `AI-clean/m8/halo/build/windows/halo.exe` | — | OpenCE + `m8.patch` (the companion body) |
+| `m8_games/m8/voice_player.py` | — | plays `tts_output/server_output.wav` to Voicemeeter AUX; barge-in via `m8_games/m8/voice_stop.txt` |
+| `m8_games/OpenCE/build/windows/halo.exe` | — | OpenCE + `m8.patch` (the companion body) |
 
 The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →

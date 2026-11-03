@@ -104,12 +104,14 @@ Gem-System-v2/
 
 ```
 C:\Users\jayge\Documents\AI\
-├── AI-clean\m8\           # canonical game companion: m8 + halo/ (OpenCE m8-kevin)
-├── AI-clean\voice_player.py  # plays server_output.wav for m8 (Gem AudioPlayer + barge-in)
+├── Gem-System-v2\         # this repo
+├── m8_games\              # the game side (canonical)
+│   ├── m8\                # brain: gem-m8 (m8.toml, personas, voices)
+│   ├── OpenCE\            # Halo engine: m8-kevin; data\ holds the 1.8 GB maps
+│   └── hlsdk-portable\    # GoldSrc mod: gem-hlm8
 ├── chasm\                 # legacy NPC backend (:7341), kept on disk
-├── xbox\OpenCE\           # chasm-bridge build + shared maps/data root
+├── xbox\OpenCE\           # legacy chasm-bridge source (maps moved to m8_games/OpenCE/data)
 ├── _archive\              # old m8 fork, chasm-bridge-fnv, old Gem-System, opence copies
-└── Gem-System-v2\         # this repo
 ```
 
 ## Notes

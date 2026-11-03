@@ -312,7 +312,7 @@ tab launches gpu_viz / now_playing / token_usage / text scroller in their own co
 
 The Halo: Combat Evolved campaign companion, and the only game path. Two processes:
 
-1. **The game** — `AI-clean/m8/halo/build/windows/halo.exe` (OpenCE + `m8.patch`). Its
+1. **The game** — `m8_games/OpenCE/build/windows/halo.exe` (OpenCE + `m8.patch`). Its
    `companion.c` spawns Gem beside the player, drives her body through `unit_control`
    (move, aim, fire, reload, cover, grenades, melee, vehicles, jump/crouch), and its
    `mate_link.c` exchanges framed JSON + PCM with m8 on **47800**.
@@ -330,7 +330,7 @@ is a local patch in the gitignored `tts/StyleTTS2/watcher.py`. The game's voice 
 `hlm8/mate_audio_device.txt` (Half-Life tab → Voice output; a name substring, empty = default).
 The engine's own sound is `snd_device` in `hlm8/config.cfg` (the tab's Game audio output; exact
 name; restart). That player stays for
-the stream's own TTS; m8 writes `AI-clean/m8/voice_stop.txt` when the player talks over Gem.
+the stream's own TTS; m8 writes `m8_games/m8/voice_stop.txt` when the player talks over Gem.
 Persona: `examples/kevin`
 (`system_prompt.txt`, `combat_prompt.txt`, `radio_prompt.txt`, `levels/`). Settings:
 `m8.toml` (`[mate]`, `[mic]`, `[stt]`, `[kev]`, `[llm]`, `[game]`) and the game's

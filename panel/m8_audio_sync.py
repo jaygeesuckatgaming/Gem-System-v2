@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-M8_ROOT = Path(os.environ.get("M8_ROOT", r"C:\Users\jayge\Documents\AI\AI-clean\m8"))
+M8_ROOT = Path(os.environ.get("M8_ROOT", r"C:\Users\jayge\Documents\AI\m8_games\m8"))
 M8_TOML = M8_ROOT / "m8.toml"
 HALO_CONFIG = M8_ROOT / "halo" / "build" / "windows" / "config.toml"
 SDL_TOOL = PROJECT_ROOT / "tools" / "sdl_devices.exe"

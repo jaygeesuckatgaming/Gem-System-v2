@@ -29,7 +29,7 @@ OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://127.0.0.1:11434').rstrip('/')
 CREATE_NEW_CONSOLE = 0x00000010
 
 # The Half-Life m8 mod (hlsdk-mate) and the game it lives in.
-HLSDK_ROOT = Path("C:/Users/jayge/Documents/AI/AI-clean/hlsdk-mate")
+HLSDK_ROOT = Path("C:/Users/jayge/Documents/AI/m8_games/hlsdk-portable")
 HALF_LIFE_ROOT = Path("C:/Program Files (x86)/Steam/steamapps/common/Half-Life")
 HL_MOD_ROOT = HALF_LIFE_ROOT / "hlm8"
 HL_MODEL_OPTIONS = {
@@ -40,7 +40,7 @@ HL_MODEL_OPTIONS = {
 }
 
 # m8's own OpenCE patch (the Gem companion).
-M8_HALO_DIR = Path(M8_ROOT) / 'halo' / 'build' / 'windows'
+M8_HALO_DIR = Path(M8_ROOT).parent / 'OpenCE' / 'build' / 'windows'
 M8_HALO_EXE = M8_HALO_DIR / 'halo.exe'
 
 

@@ -33,10 +33,10 @@ drive_game/ (:5010, Ursina window) ← !commands forwarded by main.py
 Halo: Combat Evolved campaign companion. The Gem panel's **Games → m8 - Gem** tab
 starts and monitors it.
 
-- **Game**: `C:\Users\jayge\Documents\AI\AI-clean\m8\halo\build\windows\halo.exe`
-  (OpenCE + `m8.patch`, branch `m8-kevin`). Data root: `xbox/OpenCE/build/windows`.
-- **Brain/link**: `AI-clean/m8/m8/target/release/m8.exe m8.toml` (`:47800`), launched by
-  `AI-clean/m8/start-m8.bat`.
+- **Game**: `C:\Users\jayge\Documents\AI\m8_games\OpenCE\build\windows\halo.exe`
+  (OpenCE + `m8.patch`, branch `m8-kevin`). Data root: `m8_games/OpenCE/data`.
+- **Brain/link**: `m8_games/m8/m8/target/release/m8.exe m8.toml` (`:47800`), launched by
+  `m8_games/m8/start-m8.bat`.
 - **Services it calls** (all Gem-System-v2): Laya `:5002` (`[kev]` decisions), Ollama
   `:11434` (`[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat`), m8 TTS adapter `:8091`
   → StyleTTS2 `:13300` (`[mate] voice_server`), Whisper `:13310` (`[stt]`), Silero VAD
@@ -49,8 +49,8 @@ starts and monitors it.
   `hlm8/mate_audio_device.txt` (the Half-Life tab's Voice output card; a name substring, empty
   = system default). The engine's own sound (gunfire, ambience) is GoldSrc's `snd_device` in
   `hlm8/config.cfg` (the tab's Game audio output card; exact name; restart the game). m8 writes
-  `AI-clean/m8/voice_stop.txt` on barge-in.
-- **Panel**: `M8_ROOT` defaults to `AI-clean/m8`; Games opens on **m8 - Gem**; the Games
+  `m8_games/m8/voice_stop.txt` on barge-in.
+- **Panel**: `M8_ROOT` defaults to `m8_games/m8`; Games opens on **m8 - Gem**; the Games
   page has `Start m8 TTS adapter` and `Start m8`; the Audio tab has `STT`.
 - **Name**: the companion's name is one setting in two files — the game's `config.toml`
   `[companion] name` (state/event/console text; env `HALO_COMPANION_NAME`) and `m8.toml`'s
@@ -77,7 +77,7 @@ starts and monitors it.
 
 ### Half-Life — the same mate in GoldSrc (`hlsdk-mate`)
 
-The m8 link is game-agnostic; `AI-clean/hlsdk-mate` is the GoldSrc adapter (branch `gem-hlm8`,
+The m8 link is game-agnostic; `m8_games/hlsdk-portable` is the GoldSrc adapter (branch `gem-hlm8`,
 kept local). It builds an HLSDK-portable mod whose server DLL connects to the same
 `127.0.0.1:47800` link: `dlls/mate.cpp` (socket, state/orders) and `dlls/mate_world.cpp` (a
 `monster_barney` follower, `gem_mate` targetname, follow/hold/attack, catch-up teleport); the
