@@ -96,12 +96,12 @@ installed. **Eyes**: the server turns m8's view requests into a `MateView` messa
 grabs the rendered frame (`glReadPixels`, 960 wide, before the HUD) into `hlm8/mate_view.raw`;
 the server forwards it as a view frame, so `/eyes` and the vision model work in GoldSrc.
 
-### Legacy: the chasm NPC path
+### Legacy: the chasm NPC path (archived)
 
-`C:\Users\jayge\Documents\AI\chasm` + `xbox/OpenCE` (branch `chasm-bridge`, `:7341`) is
-the older "command an existing NPC" engine (profile + 6-verb action book, StyleTTS2/Whisper
-called by the bridge directly). It is **kept on disk but no longer in the panel** and is not
-the current path. The `ai-player` network-co-op experiment and `halo_brain.py` are removed.
+The older "command an existing NPC" engine (`:7341`, profile + 6-verb action book) is archived
+under `_archive/chasm-20261103/` and `_archive/xbox-OpenCE-20261103/`; the GitHub repos remain.
+It is not in the panel and not the current path. The `ai-player` network-co-op experiment and
+`halo_brain.py` are removed.
 
 ## Documentation index (read the one matching your task)
 

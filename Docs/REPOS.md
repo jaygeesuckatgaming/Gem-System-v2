@@ -38,27 +38,22 @@ Nested engine repos these use:
 - **Social Stream Ninja** — the browser extension / cloud relay; its local relay is `ssn_relay.py` in Gem-System-v2.
 - **OBS + Voicemeeter**, the **Unreal avatar** project, and the **Steam Half-Life install** — outside this tree.
 
-## Legacy (kept on disk, not used by the panel)
+## Archived (not used by the panel; the GitHub repos remain)
 
-| Repo | Branch | Origin | Note |
-|---|---|---|---|
-| `chasm` | `main` | `jaygeesuckatgaming/chasm` | Legacy NPC backend (`:7341`); kept for reference |
-| `xbox/OpenCE` | `chasm-bridge` | `jaygeesuckatgaming/OpenCE` | Legacy chasm-bridge clone; its build data was archived (the maps moved to `m8_games/OpenCE/data`) |
-| `chasm-bridge-fnv` | `main` | `jaygeesuckatgaming/chasm-bridge-fnv` | Legacy Fallout: New Vegas experiment |
+All under `C:\Users\jayge\Documents\AI\_archive\`:
 
-## Archive
+- `chasm-20261103` — the legacy NPC backend (`:7341`, profile + 6-verb action book) and its
+  Parakeet engine. Stopped and moved 2026-11-03.
+- `xbox-OpenCE-20261103` — the legacy `chasm-bridge` source (its maps were moved to
+  `m8_games/OpenCE/data` before archiving).
+- `chasm-bridge-fnv-20261103` — the Fallout: New Vegas experiment.
+- `Not_Used-20261103` — the old "not used" pile (`ollama-log-proxy_org`, `releases`).
+- `AI-clean-20261103/` — the old m8 (with its `halo/` clone) and the old working hlsdk clone
+  (`hlsdk-mate`; its `gem-hlm8` is now on `jaygeesuckatgaming/hlsdk-portable`).
+- `xbox-OpenCE-build-20261103` — the old OpenCE build/artifacts.
+- `m8-fork`, `Gem-System`, `Old_Stuff`, `opence-gem`, `chasm_system` — older copies.
 
-- `_archive/m8-fork` — the old m8 fork.
-- `_archive/Gem-System` — the old Gem system.
-- `_archive/AI-clean-20261103/hlsdk-mate` — the old working hlsdk clone; its `gem-hlm8` branch is
-  now on `jaygeesuckatgaming/hlsdk-portable`.
-- `_archive/xbox-OpenCE-build-20261103` — the old OpenCE build/artifacts.
-- `_archive/Old_Stuff`, `_archive/opence-gem`, `_archive/chasm_system` — older copies.
-
-## Leftover to delete
-
-`C:\Users\jayge\Documents\AI\AI-clean\m8` — the old m8 repo (plus its old `halo/` clone). Windows
-still holds it open (an old m8 console/editor); close that or reboot, then delete `AI-clean`.
+`xbox\` itself stays: it holds the Halo ISO/extract tools and `vJoySetup.exe`, not a repo.
 
 ## Remotes worth knowing
 

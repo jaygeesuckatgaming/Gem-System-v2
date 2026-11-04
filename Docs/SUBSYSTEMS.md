@@ -342,5 +342,5 @@ transparent, for the panel card and an OBS Browser Source — and `/eyes.png`, t
 The frames the brain itself looks at are saved in `logs/views/` and shown in `/history`; the
 feed and a Laya "look" take turns on one view request.
 
-**Legacy:** chasm (`chasm/` + `xbox/OpenCE` `chasm-bridge`, `:7341`) commands existing
-NPCs through a profile/action book; it is kept on disk but no longer in the panel.
+**Legacy:** chasm (`:7341`) is archived under `_archive/chasm-20261103/` (with its
+`xbox/OpenCE` `chasm-bridge` source); it is not in the panel.

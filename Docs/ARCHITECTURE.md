@@ -266,6 +266,6 @@ The name is set in two places at once by the panel: the game's `config.toml`
 each session to Cognee (`:8011`, `[memory]` in `m8.toml`, `source = "halo"`) and recalls past
 sessions + the player at connect.
 
-**Legacy:** the chasm NPC path (`chasm/` + `xbox/OpenCE` on `chasm-bridge`, `:7341`) is
-kept on disk but no longer in the panel; it commands existing NPCs through the `opence`
-profile/action book and calls StyleTTS2/Whisper directly.
+**Legacy:** the chasm NPC path (`:7341`) is archived under `_archive/chasm-20261103/` and
+`_archive/xbox-OpenCE-20261103/`, not in the panel; it commanded existing NPCs through the
+`opence` profile/action book and called StyleTTS2/Whisper directly.

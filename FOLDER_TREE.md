@@ -109,9 +109,8 @@ C:\Users\jayge\Documents\AI\
 │   ├── m8\                # brain: gem-m8 (m8.toml, personas, voices)
 │   ├── OpenCE\            # Halo engine: m8-kevin; data\ holds the 1.8 GB maps
 │   └── hlsdk-portable\    # GoldSrc mod: gem-hlm8
-├── chasm\                 # legacy NPC backend (:7341), kept on disk
-├── xbox\OpenCE\           # legacy chasm-bridge source (maps moved to m8_games/OpenCE/data)
-├── _archive\              # old m8 fork, chasm-bridge-fnv, old Gem-System, opence copies
+├── xbox\                  # Halo ISO + extract-xiso + vJoy installer (OpenCE source archived)
+├── _archive\              # archived: chasm, xbox/OpenCE, chasm-bridge-fnv, Not_Used, AI-clean, old copies
 ```
 
 ## Notes
