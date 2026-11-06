@@ -23,3 +23,4 @@ Features
 22. Memory Using Cognee
 23. Music Requests
 24. Browser Use
+25. Can play Halo as a "COOP" player. Shares memory with Gem VTuber using Cognee
