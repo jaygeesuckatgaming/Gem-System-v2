@@ -66,11 +66,10 @@ SERVICES = {
         'port': 13300,
     },
     'whisper': {
-        'title': 'Whisper STT',
+        'title': 'Whisper',
         'bat': os.path.join(PROJECT_ROOT, 'start_scripts', 'start_whisper_server.bat'),
         'health': 'http://127.0.0.1:13310/health',
         'port': 13310,
-        'header': False,
     },
     'm8_tts': {
         'title': 'm8 TTS adapter',
