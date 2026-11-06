@@ -92,6 +92,11 @@ STT_SILENCE_THRESHOLD_S = 2.0
 STT_PRE_BUFFER_S = 0.5
 STT_MAX_RECORD_S = 120.0  # max recording duration; force-process if no silence
 STT_MIN_DB = -40.0   # Energy gate: audio below this dB level is ignored (matches the VU meter)
+# The one Whisper HTTP server, shared by Gem's mic listener and the m8 companion.
+STT_SERVER_URL = "http://127.0.0.1:13310"
+# Who receives microphone transcripts: "gem" (Gem System chat) or "m8" (the
+# m8 adapter playing OpenCE). The other side gets empty text.
+MIC_ROUTE = "gem"
 
 # Background music / playlist volume (0.0 - 1.0)
 BACKGROUND_VOLUME = 0.5

@@ -757,6 +757,55 @@ def _m8_gem_tab(sm):
         f'it, Whisper hears you, and the m8-patched OpenCE gives {companion} their body.'
     ).classes('text-sm text-slate-400 max-w-3xl')
 
+    # -------------------------------------------------------------- mic routing
+    cfg = settings_store.load_config()
+    stt_url = getattr(cfg, 'STT_SERVER_URL', 'http://127.0.0.1:13310').rstrip('/')
+    current_route = str(getattr(cfg, 'MIC_ROUTE', 'gem')).lower()
+    with ui.card().classes('w-full'):
+        ui.label('Mic routing').classes('text-lg font-bold')
+        ui.label(
+            'One shared Whisper server hears the microphone. This picks who receives the '
+            'transcripts: Gem System (chat) or the m8 adapter (OpenCE). The other side gets '
+            'empty text and stays quiet — switch back instantly, no restarts.'
+        ).classes('text-sm text-slate-400 max-w-3xl')
+        route_toggle = ui.toggle(
+            {'gem': 'Gem System', 'm8': f'm8 Adapter ({companion})'},
+            value=current_route if current_route in ('gem', 'm8') else 'gem',
+        )
+        route_status = ui.label('').classes('text-sm text-slate-400')
+
+        async def refresh_route():
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    response = await client.get(f'{stt_url}/health')
+                live = response.json().get('route', '?')
+                route_status.text = f'Whisper {stt_url}: up · live route: {live}'
+                route_status.classes(replace='text-sm text-green-400')
+            except Exception:
+                route_status.text = f'Whisper {stt_url}: unreachable (start it above)'
+                route_status.classes(replace='text-sm text-orange-400')
+
+        async def save_route():
+            value = route_toggle.value or 'gem'
+            file_ok, _pushed = await asyncio.to_thread(settings_store.save, {'MIC_ROUTE': value})
+            live_ok = False
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.post(f'{stt_url}/route', json={'route': value})
+                live_ok = response.status_code == 200
+            except Exception:
+                pass
+            target = 'Gem System' if value == 'gem' else f'the m8 adapter ({companion})'
+            ui.notify(
+                f'Microphone now goes to {target}'
+                + ('' if live_ok else ' · Whisper not running; applies when it starts'),
+                type='positive' if file_ok else 'negative',
+            )
+            await refresh_route()
+
+        ui.button('Apply mic routing', icon='swap_horiz', on_click=save_route)
+        ui.timer(5.0, refresh_route, immediate=True)
+
     tiles = {}
     with ui.card().classes('w-full'):
         with ui.row().classes('w-full items-center justify-between'):
@@ -767,7 +816,8 @@ def _m8_gem_tab(sm):
                 ('laya', 'Laya decision'),
                 ('tts', 'StyleTTS2'),
                 ('m8tts', 'm8 TTS adapter'),
-                ('whisper', 'Whisper STT'),
+                ('whisper', 'Whisper (shared)'),
+                ('stt', 'Gem mic listener'),
                 ('m8', 'm8 brain'),
                 ('game', 'OpenCE (m8)'),
             ):
@@ -797,6 +847,7 @@ def _m8_gem_tab(sm):
                 ('tts', 'styletts2'),
                 ('m8tts', 'm8_tts'),
                 ('whisper', 'whisper'),
+                ('stt', 'stt'),
                 ('m8', 'm8'),
             ):
                 states[key] = await sm.is_running(name)
@@ -816,6 +867,10 @@ def _m8_gem_tab(sm):
 
             laya_button.text = 'Stop Laya' if states['laya'] else 'Start Laya'
             tts_button.text = 'Stop StyleTTS2' if states['tts'] else 'Start StyleTTS2'
+            whisper_button.text = ('Stop Whisper' if states['whisper']
+                                   else 'Start Whisper (shared)')
+            listener_button.text = ('Stop mic listener' if states['stt']
+                                    else 'Start Gem mic listener')
             game_button.text = 'Stop OpenCE' if game_running else 'Launch OpenCE'
 
         async def toggle_service(name):
@@ -857,6 +912,10 @@ def _m8_gem_tab(sm):
                                     on_click=lambda: toggle_service('laya'))
             tts_button = ui.button('Start StyleTTS2', icon='play_arrow',
                                    on_click=lambda: toggle_service('styletts2'))
+            whisper_button = ui.button('Start Whisper (shared)', icon='graphic_eq',
+                                       on_click=lambda: toggle_service('whisper'))
+            listener_button = ui.button('Start Gem mic listener', icon='mic',
+                                        on_click=lambda: toggle_service('stt'))
             game_button = ui.button('Launch OpenCE', icon='sports_esports',
                                     on_click=toggle_game)
             ui.button('Refresh', icon='refresh', on_click=refresh).props('flat')
@@ -1079,16 +1138,17 @@ def _m8_gem_tab(sm):
             'StyleTTS2 (voice engine) — Start StyleTTS2 above.',
             'm8 TTS adapter (Games toolbar) — start it before m8: m8 reads its sample rate '
             'when it starts.',
-            'Whisper STT (Audio tab).',
+            'Whisper (shared) — start it once above. Gem\'s mic listener and the companion '
+            'both use this one server.',
             'm8 (Games toolbar).',
-            'Launch OpenCE above, then just talk: the mic is always listening and the game\'s '
-            'mic key mutes it.',
+            'Set Mic routing to m8 Adapter, then Launch OpenCE above and just talk: only the '
+            'companion hears you. Switch it back to Gem System to talk to Gem again.',
         ), 1):
             ui.label(f'{number}. {step}').classes('text-sm text-slate-300')
         ui.label(
             f'Laya picks do/which/speak, Ollama writes what {companion} says, StyleTTS2 voices it, '
-            'Whisper hears you, and OpenCE (with m8\'s patch) gives them a body. Cognee (Memory '
-            'tab) is optional: it stores each play session and what they remember.'
+            'one shared Whisper hears you, and OpenCE (with m8\'s patch) gives them a body. '
+            'Cognee (Memory tab) is optional: it stores each play session and what they remember.'
         ).classes('text-xs text-slate-500 mt-1')
         with ui.row().classes('gap-3 items-center flex-wrap mt-2'):
             ui.link('m8 brain page', 'http://127.0.0.1:8090', new_tab=True)

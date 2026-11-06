@@ -39,8 +39,9 @@ starts and monitors it.
   `m8_games/m8/start-m8.bat`.
 - **Services it calls** (all Gem-System-v2): Laya `:5002` (`[kev]` decisions), Ollama
   `:11434` (`[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat`), m8 TTS adapter `:8091`
-  → StyleTTS2 `:13300` (`[mate] voice_server`), Whisper `:13310` (`[stt]`), Silero VAD
-  inside m8, mic `Voicemeeter Out B1`.
+  → StyleTTS2 `:13300` (`[mate] voice_server`), the **one shared Whisper** `:13310` (`[stt]`),
+  Silero VAD inside m8, mic `Voicemeeter Out B1`. `MIC_ROUTE` in config.py decides whether
+  Gem's mic listener or m8 receives the transcripts; the other side gets empty text.
 - **Voice playback**: the game plays m8's PCM (the GoldSrc client through waveOut, OpenCE
   through its own audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 doesn't write
   `tts_output/server_output.wav` for m8's lines — otherwise the Python `voice_player`

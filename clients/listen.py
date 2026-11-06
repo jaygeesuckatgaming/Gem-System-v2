@@ -2,11 +2,13 @@
 #                      Audio Client for MCP
 # ==============================================================================
 # This script acts as the "ears" of the system. Its sole purpose is to listen
-# via the microphone, use a local Whisper model to transcribe speech, and send
-# the resulting text to the MCP for filtering and reasoning.
+# via the microphone, have the shared Whisper server transcribe speech, and
+# send the resulting text to the MCP for filtering and reasoning.
 #
-# This version automatically reads the selected input device from the central
-# mcp_settings.ini file.
+# Whisper is NOT loaded here: clients/whisper_server.py owns the one model and
+# both this listener and the m8 companion use it. The server routes transcripts
+# using config.py's MIC_ROUTE, so while m8 is playing this listener receives
+# empty text instead of Gem hearing the same words.
 # ==============================================================================
 
 import collections
@@ -20,8 +22,6 @@ import configparser
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-from faster_whisper import WhisperModel
-from scipy.io.wavfile import read as read_wav
 
 # --- Configuration (defaults; overridden from config.py at runtime) ---
 VAD_AGGRESSIVENESS = 1
@@ -65,7 +65,8 @@ def load_settings_from_ini():
         print(f"AUDIO INFO: MCP URL set to -> {settings['mcp_url']}")
 
         # Load STT tuning values from config.py
-        settings['whisper_model'] = getattr(cfg, 'STT_WHISPER_MODEL', 'openai/whisper-base.en')
+        settings['stt_url'] = getattr(cfg, 'STT_SERVER_URL', 'http://127.0.0.1:13310').rstrip('/')
+        print(f"AUDIO INFO: Whisper server -> {settings['stt_url']}")
         VAD_AGGRESSIVENESS = int(getattr(cfg, 'STT_VAD_AGGRESSIVENESS', 1))
         SILENCE_THRESHOLD_S = float(getattr(cfg, 'STT_SILENCE_THRESHOLD_S', 2.0))
         PRE_BUFFER_S = float(getattr(cfg, 'STT_PRE_BUFFER_S', 0.5))
@@ -132,13 +133,11 @@ def main():
     activity_url = settings['activity_url']
     selected_device = settings['device_id']
 
+    stt_url = settings['stt_url']
     print("\nInitializing services...")
     try:
         vad = webrtcvad.Vad(VAD_AGGRESSIVENESS); print("- VAD initialized.")
-        print("- Loading Whisper model...")
-        model_name = settings['whisper_model']
-        model = WhisperModel(model_name, device="auto", compute_type="int8")
-        print("- Whisper loaded.")
+        print(f"- Using the shared Whisper server at {stt_url} (no local model).")
     except Exception as e:
         sys.exit(f"An error occurred during initialization: {e}")
 
@@ -177,10 +176,24 @@ def main():
                     wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(SAMPLE_RATE); wf.writeframes(b''.join(all_frames))
 
                 try:
-                    sr, audio_data = read_wav(WAV_FILE_NAME)
-                    audio_data = audio_data.astype(np.float32) / 32768.0
-                    segments, _info = model.transcribe(audio_data, language="en", beam_size=5)
-                    transcribed_text = " ".join(seg.text.strip() for seg in segments).strip()
+                    with open(WAV_FILE_NAME, 'rb') as fh:
+                        wav_bytes = fh.read()
+                    response = requests.post(
+                        f"{stt_url}/v1/audio/transcriptions",
+                        headers={'X-Mic-Client': 'gem'},
+                        files={'file': ('speech.wav', wav_bytes, 'audio/wav')},
+                        data={'model': 'gem'},
+                        timeout=60,
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                    transcribed_text = str(body.get('text') or '').strip()
+                    if body.get('skipped'):
+                        # Mic is routed to m8: stay quiet, keep listening.
+                        print("Transcription skipped (mic routed to m8)")
+                except requests.exceptions.RequestException as e:
+                    print(f"STT server error: {e}")
+                    transcribed_text = ""
                 except Exception as e:
                     print(f"Whisper transcription error: {e}")
                     transcribed_text = ""

@@ -20,7 +20,7 @@ flowchart LR
         MAIN[main.py MCP server<br/>:5000]
         SSNR[ssn_relay.py<br/>ws://127.0.0.1:3000]
         LAYA[laya_server.py<br/>:5002]
-        LISTEN[listen.py<br/>Whisper STT]
+        LISTEN[listen.py<br/>mic -> shared Whisper]
         COG[cognee_server.py<br/>:8011]
         VIS[vision.py<br/>:5001 + face recognition]
         OLLAMA[Ollama<br/>http://localhost:11434]
@@ -118,7 +118,7 @@ Live values come from `config.py` — the defaults below can drift from the comm
 | 13301 | HTTP | Pocket TTS | `POCKET_TTS_URL` (config.py:54) + `tts/pocket-tts/settings.ini` |
 | 13302 | HTTP | Qwen3-TTS | `QWEN_TTS_URL` (config.py:64) + `tts/Qwen3-TTS/settings.ini` |
 | 9000 | HTTP | Neurosync Local API (`audio_to_blendshapes`) | `NEUROSYNC_LOCAL_URL` (config.py:100) |
-| 13310 | HTTP | Neurosync audio listener (LAN push from main.py; merged watcher listens) | `NEUROSYNC_AUDIO_LISTEN_PORT`, `NEUROSYNC_AUDIO_PUSH_URL` (config.py:50-51) |
+| 13310 | HTTP | The one Whisper STT server (`127.0.0.1`), shared by Gem's mic listener and m8; the merged watcher's unused pushed-audio listener binds `0.0.0.0` on the same number | `STT_SERVER_URL`, `MIC_ROUTE`, `NEUROSYNC_AUDIO_LISTEN_PORT` (config.py) |
 | 8080 | HTTP | `panel.py` NiceGUI control panel (alternative to `gui.py`) | hardcoded (panel.py:150) |
 | 11433 | HTTP | Ollama | `OLLAMA_BASE_URL` (config.py:7) — **code defaults and `config_example.py` say 11434** |
 | 8188 | HTTP | ComfyUI + YuE2 song generation | `MUSIC_GEN_COMFYUI_URL` (config.py:170) |
@@ -198,7 +198,7 @@ flowchart LR
         PANEL["Control panel :8080"]
         LAYA["Laya :5002<br/>decisions"]
         TTS["StyleTTS2 :13300<br/>the voice engine"]
-        STT["Whisper :13310<br/>STT"]
+        STT["Whisper :13310<br/>shared STT (Gem + m8)"]
         ADAPT["m8 TTS adapter :8091<br/>Breeze → StyleTTS2"]
         MAIN["main.py (VTuber)"]
         COG["Cognee :8011<br/>shared memory"]
@@ -240,7 +240,7 @@ StyleTTS2 directly; it writes `tts_output/server_output.wav`, which `voice_playe
 `m8_games/m8`) plays to Voicemeeter AUX. The adapter sends `no_save`, so m8's lines never enter
 that file (no double playback).
 
-**Mic**: `Voicemeeter Out B1` → m8 (Silero VAD) → Whisper. **Memory**: Cognee is one graph,
+**Mic**: `Voicemeeter Out B1` → m8 (Silero VAD) → the shared Whisper (`MIC_ROUTE` decides whether Gem or m8 receives the text). **Memory**: Cognee is one graph,
 shared by `main.py` (chat) and m8 (play sessions, `source = "halo"`).
 
 | Process | Port | Role |
@@ -248,7 +248,7 @@ shared by `main.py` (chat) and m8 (play sessions, `source = "halo"`).
 | `m8_games/m8/m8/target/release/m8.exe m8.toml` | **47800** | brain/link: game state in, actions + speech out |
 | `clients/m8_styletts2_adapter.py` | **8091** | Breeze TTS 2 API → StyleTTS2 (raw PCM) |
 | `tts/StyleTTS2/watcher.py` | **13300** | actual voice engine |
-| `clients/whisper_server.py` | **13310** | STT for the mic |
+| `clients/whisper_server.py` | **13310** | the one Whisper for Gem's mic listener **and** m8; routes transcripts by `MIC_ROUTE` |
 | `clients/laya_server.py` | **5002** | `[kev]` decision model (`/v1/systemone`) |
 | Ollama | **11434** | `[llm]` `gemma3-4b-ctx`, vision `gemma3:4b-it-qat` |
 | `cognee/cognee_server.py` | **8011** | `[memory]` shared Cognee memory (sessions, player) |
@@ -257,7 +257,7 @@ shared by `main.py` (chat) and m8 (play sessions, `source = "halo"`).
 
 The game connects to m8 over `mate_link` (`47800`): `companion.c` sends the feed, m8 replies
 with structured actions (`unit_control`), and the voice comes from the m8 TTS adapter →
-StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → Whisper. Panel: **Games → m8 - Gem**.
+StyleTTS2. Mic: `Voicemeeter Out B1` → Silero VAD → the shared Whisper. Panel: **Games → m8 - Gem**.
 The same process serves its page on **8090**: `/history` (every model call, with the pictures
 Gem looked at) and `/eyes` — the player's view grabbed about once a second for the panel and an
 OBS Browser Source (`/eyes.png` is the latest frame).

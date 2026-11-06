@@ -121,6 +121,8 @@ MAIN_KEY_MAP = {
     'STT_SILENCE_THRESHOLD_S': 'stt_silence_threshold_s',
     'STT_PRE_BUFFER_S': 'stt_pre_buffer_s',
     'STT_MIN_DB': 'stt_min_db',
+    'STT_SERVER_URL': 'stt_server_url',
+    'MIC_ROUTE': 'mic_route',
     # Twitch
     'TWITCH_ENABLED': 'twitch_enabled',
     'TWITCH_CLIENT_ID': 'twitch_client_id',

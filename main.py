@@ -144,6 +144,10 @@ idle = IdleManager(
 # toggled live, but idle should only be suppressed when the game process is
 # reachable — not merely when the flag is on.
 async def _idle_game_suppressed() -> bool:
+    # While the mic is routed to the m8 companion (OpenCE), Gem should not
+    # monologue over the game even though its own listener is still running.
+    if str(getattr(config, 'MIC_ROUTE', 'gem')).lower() == 'm8':
+        return True
     if not getattr(config, 'GAME_DRIVE_SUPPRESS_IDLE', True):
         return False
     if not getattr(config, 'GAME_DRIVE_ENABLED', False):
@@ -553,6 +557,8 @@ def save_config():
             'AVATAR_TALK_START_DELAY_S': (config.AVATAR_TALK_START_DELAY_S, False),
             'AVATAR_TALK_STOP_DELAY_S': (config.AVATAR_TALK_STOP_DELAY_S, False),
             'STT_WHISPER_MODEL': (config.STT_WHISPER_MODEL, True),
+            'STT_SERVER_URL': (config.STT_SERVER_URL, True),
+            'MIC_ROUTE': (config.MIC_ROUTE, True),
             'STT_VAD_AGGRESSIVENESS': (config.STT_VAD_AGGRESSIVENESS, False),
             'STT_SILENCE_THRESHOLD_S': (config.STT_SILENCE_THRESHOLD_S, False),
             'STT_PRE_BUFFER_S': (config.STT_PRE_BUFFER_S, False),
@@ -2155,6 +2161,13 @@ async def api_update_settings():
         config.TTS_OUTPUT_PATH = data['tts_output_path']
     if 'stt_whisper_model' in data:
         config.STT_WHISPER_MODEL = data['stt_whisper_model']
+    if 'stt_server_url' in data:
+        config.STT_SERVER_URL = data['stt_server_url']
+    if 'mic_route' in data:
+        value = str(data['mic_route']).strip().lower()
+        if value in ('gem', 'm8'):
+            config.MIC_ROUTE = value
+            print(f"[SETTINGS] MIC_ROUTE -> {value}", flush=True)
     if 'stt_vad_aggressiveness' in data:
         config.STT_VAD_AGGRESSIVENESS = data['stt_vad_aggressiveness']
     if 'stt_silence_threshold_s' in data:

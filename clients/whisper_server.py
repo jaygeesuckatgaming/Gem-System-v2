@@ -1,10 +1,21 @@
-"""Local Whisper transcription server for the OpenCE bridge.
+"""The one local Whisper server, shared by Gem and the m8 companion.
 
-A tiny stdlib HTTP server around faster-whisper, so the game can turn a push-
-to-talk WAV into text without pulling Whisper into the C process.
+A tiny stdlib HTTP server around faster-whisper, so a game (or a mic loop) can
+turn a WAV into text without loading Whisper twice.
 
-    GET  /health      -> {"ok": true, "model": "base.en"}
+    GET  /health      -> {"ok": true, "model": "base.en", "route": "gem"}
+    POST /route       -> {"route": "gem"|"m8"}   (live switch, no restart)
     POST /transcribe  -> raw WAV body; {"text": "...", "language": "en"}
+    POST /v1/audio/transcriptions -> OpenAI-style multipart (what m8 sends)
+
+One Whisper model serves both consumers, but only the routed one receives
+transcripts. config.py's MIC_ROUTE says who that is:
+    "gem" -> Gem's mic listener (clients/listen.py) gets the text; m8 gets ""
+    "m8"  -> the m8 adapter gets the text; Gem's listener gets ""
+
+The caller is identified by the `X-Mic-Client` header (Gem's listener sends
+`gem`), falling back to the multipart `model` field (`gem`/`m8`), and otherwise
+treated as m8 — m8 is the only other client and sends `model=whisper-1`.
 
 Run it in mcp_env_2 (faster-whisper lives there):
 
@@ -28,6 +39,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from faster_whisper import WhisperModel
 
 try:
+    import config as app_config
+except Exception:
+    app_config = None
+
+try:
     from config import STT_WHISPER_MODEL as CONFIG_MODEL
 except Exception:
     CONFIG_MODEL = "base.en"
@@ -42,6 +58,27 @@ model = WhisperModel(MODEL_NAME, device="auto", compute_type="int8")
 print(f"[whisper] ready on http://{HOST}:{PORT}", flush=True)
 
 transcribe_lock = threading.Lock()
+
+# Set by POST /route; wins over config.py until the next restart. The panel
+# writes config.py too, so a restart comes back to the same place.
+_route_override: str | None = None
+
+
+def current_route() -> str:
+    if _route_override in ("gem", "m8"):
+        return _route_override
+    value = str(getattr(app_config, "MIC_ROUTE", "gem") or "gem").strip().lower()
+    return value if value in ("gem", "m8") else "gem"
+
+
+def client_of(header_value: str | None, model_field: str | None) -> str:
+    """Which consumer sent this request. Untagged means m8."""
+    for value in (header_value, model_field):
+        value = str(value or "").strip().lower()
+        if value in ("gem", "m8"):
+            return value
+    return "m8"
+
 
 
 def transcribe_wav(data: bytes) -> dict:
@@ -95,12 +132,37 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") in ("/health", ""):
-            self._send(200, {"ok": True, "model": MODEL_NAME})
+            self._send(200, {
+                "ok": True,
+                "model": MODEL_NAME,
+                "route": current_route(),
+            })
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path.rstrip("/") not in ("/transcribe", "/v1/audio/transcriptions"):
+        global _route_override
+        path = self.path.rstrip("/")
+
+        if path == "/route":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            body = self.rfile.read(length) if 0 < length <= 4096 else b"{}"
+            try:
+                wanted = str(json.loads(body or b"{}").get("route", "")).strip().lower()
+            except (ValueError, AttributeError):
+                wanted = ""
+            if wanted not in ("gem", "m8"):
+                self._send(400, {"error": "route must be 'gem' or 'm8'"})
+                return
+            _route_override = wanted
+            print(f"[whisper] mic route -> {wanted}", flush=True)
+            self._send(200, {"ok": True, "route": wanted})
+            return
+
+        if path not in ("/transcribe", "/v1/audio/transcriptions"):
             self._send(404, {"error": "not found"})
             return
 
@@ -116,6 +178,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         data = self.rfile.read(length)
+        model_field = None
         # Accept a raw WAV (/transcribe) or an OpenAI-style multipart upload
         # (/v1/audio/transcriptions), whose `file` part is the WAV.
         content_type = self.headers.get("Content-Type", "")
@@ -126,10 +189,27 @@ class Handler(BaseHTTPRequestHandler):
             audio = b""
             if message.is_multipart():
                 for part in message.iter_parts():
-                    if part.get_param("name", header="content-disposition") == "file":
+                    name = part.get_param("name", header="content-disposition")
+                    if name == "file":
                         audio = part.get_payload(decode=True) or b""
-                        break
+                    elif name == "model":
+                        payload = part.get_payload(decode=True) or b""
+                        model_field = payload.decode("utf-8", "ignore")
             data = audio
+
+        client = client_of(self.headers.get("X-Mic-Client"), model_field)
+        route = current_route()
+        if client != route:
+            # The other consumer gets silence: no temp file, no Whisper run.
+            self._send(200, {
+                "text": "",
+                "language": "en",
+                "skipped": True,
+                "route": route,
+                "client": client,
+            })
+            return
+
         if not data.startswith(b"RIFF"):
             self._send(400, {"error": "expected a WAV body"})
             return

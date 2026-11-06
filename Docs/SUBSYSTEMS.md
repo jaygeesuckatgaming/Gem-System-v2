@@ -320,7 +320,7 @@ The Halo: Combat Evolved campaign companion, and the only game path. Two process
    asks **Laya** (`[kev]`, `:5002`) for the quick decision, **Ollama** (`[llm]`,
    `gemma3-4b-ctx`) for the line/vision, and sends speech to the **m8 TTS adapter**
    (`:8091`, Breeze API → StyleTTS2 `:13300`). Mic: `Voicemeeter Out B1` → Silero VAD →
-   **Whisper** (`[stt]`, `:13310`).
+   **Whisper** (`[stt]`, `:13310`) — the one shared server (`clients/whisper_server.py`); its `MIC_ROUTE` decides whether Gem's mic listener or m8 receives each transcript (the other side gets empty text).
 
 Voice: the **game** plays m8's PCM (the GoldSrc client through waveOut; OpenCE through its own
 audio). The m8 TTS adapter sends `no_save`, so StyleTTS2 does **not** write
